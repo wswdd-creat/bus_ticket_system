@@ -54,7 +54,7 @@
    </property>
    <layout class="QHBoxLayout" name="horizontalLayout">
     <item>
-     <widget class="QLineEdit" name="destinationEdit">
+     <widget class="QLineEdit" name="routeNumberEdit">
       <property name="text">
        <string/>
       </property>
@@ -64,7 +64,7 @@
      </widget>
     </item>
     <item>
-     <widget class="QLineEdit" name="routeNumberEdit">
+     <widget class="QLineEdit" name="departureEdit">
       <property name="text">
        <string/>
       </property>
@@ -74,7 +74,7 @@
      </widget>
     </item>
     <item>
-     <widget class="QLineEdit" name="departureEdit">
+     <widget class="QLineEdit" name="destinationEdit">
       <property name="text">
        <string/>
       </property>
@@ -87,6 +87,13 @@
      <widget class="QPushButton" name="addRouteButton">
       <property name="text">
        <string>添加班次</string>
+      </property>
+     </widget>
+    </item>
+    <item>
+     <widget class="QPushButton" name="deleteRouteButton">
+      <property name="text">
+       <string>删除选中班次</string>
       </property>
      </widget>
     </item>
