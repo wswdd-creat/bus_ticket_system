@@ -18,4 +18,5 @@ public:
 
 private:
     Ui::Widget *ui;
+    int editingRow = -1;
 };
