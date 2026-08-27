@@ -6,12 +6,12 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QTableWidgetItem>
+#include <QLineEdit>
 
 Widget::Widget(QWidget *parent)
     : QWidget(parent), ui(new Ui::Widget)
 {
     ui->setupUi(this);
-
 
     // 初始化班次表格
     ui->routeTable->setColumnCount(3);
@@ -206,6 +206,102 @@ Widget::Widget(QWidget *parent)
                 ui->routeTable->removeRow(currentRow);
             }
         });
+
+    // =========================
+    // 搜索班次
+    // =========================
+
+    connect(
+        ui->searchButton,
+        &QPushButton::clicked,
+        this,
+        [this]()
+        {
+            const QString keyword =
+                ui->searchEdit->text().trimmed();
+
+            // 搜索框为空时显示全部数据
+            if (keyword.isEmpty())
+            {
+                for (int row = 0;
+                     row < ui->routeTable->rowCount();
+                     ++row)
+                {
+                    ui->routeTable->setRowHidden(row, false);
+                }
+
+                return;
+            }
+
+            int matchCount = 0;
+
+            for (int row = 0;
+                 row < ui->routeTable->rowCount();
+                 ++row)
+            {
+                bool matched = false;
+
+                // 检查班次号、出发地和目的地三列
+                for (int column = 0; column < 3; ++column)
+                {
+                    const QTableWidgetItem *item =
+                        ui->routeTable->item(row, column);
+
+                    if (item != nullptr && item->text().contains(
+                                               keyword,
+                                               Qt::CaseInsensitive))
+                    {
+                        matched = true;
+                        break;
+                    }
+                }
+
+                ui->routeTable->setRowHidden(row, !matched);
+
+                if (matched)
+                {
+                    ++matchCount;
+                }
+            }
+
+            if (matchCount == 0)
+            {
+                QMessageBox::information(
+                    this,
+                    QStringLiteral("搜索结果"),
+                    QStringLiteral("没有找到匹配的班次。"));
+            }
+        });
+
+    // =========================
+    // 显示全部班次
+    // =========================
+
+    connect(
+        ui->showAllButton,
+        &QPushButton::clicked,
+        this,
+        [this]()
+        {
+            ui->searchEdit->clear();
+
+            for (int row = 0;
+                 row < ui->routeTable->rowCount();
+                 ++row)
+            {
+                ui->routeTable->setRowHidden(row, false);
+            }
+
+            ui->routeTable->clearSelection();
+        });
+
+    //=========================
+    // 回车触发搜索
+    connect(
+        ui->searchEdit,
+        &QLineEdit::returnPressed,
+        ui->searchButton,
+        &QPushButton::click);
 }
 
 Widget::~Widget()

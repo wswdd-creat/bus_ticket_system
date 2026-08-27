@@ -13,9 +13,9 @@
   <property name="windowTitle">
    <string>Widget</string>
   </property>
-  <layout class="QHBoxLayout" name="horizontalLayout_2">
+  <layout class="QVBoxLayout" name="verticalLayout_2">
    <item>
-    <layout class="QVBoxLayout" name="verticalLayout" stretch="0,0,1">
+    <layout class="QVBoxLayout" name="verticalLayout" stretch="0,0,0">
      <property name="spacing">
       <number>0</number>
      </property>
@@ -24,47 +24,33 @@
        <property name="spacing">
         <number>0</number>
        </property>
-       <item row="2" column="2">
-        <widget class="QPushButton" name="deleteRouteButton">
+       <item row="3" column="3">
+        <widget class="QPushButton" name="searchButton">
          <property name="font">
           <font>
-           <pointsize>11</pointsize>
+           <family>Segoe Fluent Icons</family>
+           <pointsize>12</pointsize>
           </font>
          </property>
          <property name="text">
-          <string>删除选中班次</string>
+          <string>搜索</string>
          </property>
         </widget>
        </item>
-       <item row="2" column="1">
-        <widget class="QPushButton" name="saveEditButton">
-         <property name="enabled">
-          <bool>false</bool>
-         </property>
+       <item row="3" column="4">
+        <widget class="QPushButton" name="showAllButton">
          <property name="font">
           <font>
-           <pointsize>11</pointsize>
+           <pointsize>12</pointsize>
+           <bold>true</bold>
           </font>
          </property>
          <property name="text">
-          <string>保存修改</string>
+          <string>显示全部</string>
          </property>
         </widget>
        </item>
-       <item row="2" column="0">
-        <widget class="QPushButton" name="editRouteButton">
-         <property name="font">
-          <font>
-           <family>Microsoft YaHei UI Light</family>
-           <pointsize>11</pointsize>
-          </font>
-         </property>
-         <property name="text">
-          <string>修改选中班次</string>
-         </property>
-        </widget>
-       </item>
-       <item row="1" column="1" colspan="2">
+       <item row="1" column="0" colspan="5">
         <widget class="QLabel" name="titleLabel">
          <property name="font">
           <font>
@@ -74,7 +60,68 @@
           </font>
          </property>
          <property name="text">
-          <string>         客运售票管理系统</string>
+          <string>                                                      客运售票管理系统</string>
+         </property>
+        </widget>
+       </item>
+       <item row="3" column="0" colspan="3">
+        <widget class="QLineEdit" name="searchEdit">
+         <property name="font">
+          <font>
+           <family>MS Serif</family>
+           <pointsize>12</pointsize>
+           <bold>true</bold>
+          </font>
+         </property>
+         <property name="text">
+          <string/>
+         </property>
+         <property name="placeholderText">
+          <string>请输入班次号/目的地/出发地</string>
+         </property>
+        </widget>
+       </item>
+       <item row="4" column="0">
+        <widget class="QPushButton" name="saveEditButton">
+         <property name="enabled">
+          <bool>false</bool>
+         </property>
+         <property name="font">
+          <font>
+           <family>Microsoft YaHei</family>
+           <pointsize>11</pointsize>
+           <bold>true</bold>
+          </font>
+         </property>
+         <property name="text">
+          <string>保存修改</string>
+         </property>
+        </widget>
+       </item>
+       <item row="4" column="3" colspan="2">
+        <widget class="QPushButton" name="editRouteButton">
+         <property name="font">
+          <font>
+           <family>Microsoft YaHei UI</family>
+           <pointsize>11</pointsize>
+           <bold>true</bold>
+          </font>
+         </property>
+         <property name="text">
+          <string>修改选中班次</string>
+         </property>
+        </widget>
+       </item>
+       <item row="4" column="1" colspan="2">
+        <widget class="QPushButton" name="deleteRouteButton">
+         <property name="font">
+          <font>
+           <pointsize>11</pointsize>
+           <bold>true</bold>
+          </font>
+         </property>
+         <property name="text">
+          <string>删除选中班次</string>
          </property>
         </widget>
        </item>
@@ -102,22 +149,6 @@
         </widget>
        </item>
        <item>
-        <widget class="QLineEdit" name="destinationEdit">
-         <property name="font">
-          <font>
-           <pointsize>12</pointsize>
-           <bold>true</bold>
-          </font>
-         </property>
-         <property name="text">
-          <string/>
-         </property>
-         <property name="placeholderText">
-          <string>目的地</string>
-         </property>
-        </widget>
-       </item>
-       <item>
         <widget class="QLineEdit" name="departureEdit">
          <property name="font">
           <font>
@@ -130,6 +161,22 @@
          </property>
          <property name="placeholderText">
           <string>出发地</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QLineEdit" name="destinationEdit">
+         <property name="font">
+          <font>
+           <pointsize>12</pointsize>
+           <bold>true</bold>
+          </font>
+         </property>
+         <property name="text">
+          <string/>
+         </property>
+         <property name="placeholderText">
+          <string>目的地</string>
          </property>
         </widget>
        </item>
