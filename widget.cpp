@@ -7,11 +7,127 @@
 #include <QPushButton>
 #include <QTableWidgetItem>
 #include <QLineEdit>
+#include <QSettings>
 
 Widget::Widget(QWidget *parent)
     : QWidget(parent), ui(new Ui::Widget)
 {
     ui->setupUi(this);
+    setWindowTitle(QStringLiteral("客运售票管理系统 · V0.6"));
+    setMinimumSize(900, 620);
+
+    ui->verticalLayout_2->setContentsMargins(28, 22, 28, 22);
+    ui->verticalLayout->setSpacing(14);
+    ui->gridLayout->setHorizontalSpacing(12);
+    ui->gridLayout->setVerticalSpacing(12);
+    ui->horizontalLayout->setSpacing(12);
+    ui->titleLabel->setAlignment(Qt::AlignCenter);
+    ui->titleLabel->setMinimumHeight(64);
+
+    ui->searchEdit->setClearButtonEnabled(true);
+    ui->routeNumberEdit->setClearButtonEnabled(true);
+    ui->departureEdit->setClearButtonEnabled(true);
+    ui->destinationEdit->setClearButtonEnabled(true);
+
+    ui->routeTable->verticalHeader()->setVisible(false);
+    ui->routeTable->horizontalHeader()->setMinimumHeight(42);
+    ui->routeTable->setAlternatingRowColors(true);
+    ui->routeTable->setSortingEnabled(false);
+    ui->routeTable->setShowGrid(false);
+
+    setStyleSheet(QStringLiteral(R"(
+        QWidget {
+            background-color: #0f172a;
+            color: #e5e7eb;
+            font-family: "Microsoft YaHei UI";
+            font-size: 14px;
+        }
+        QLabel#titleLabel {
+            color: #f8fafc;
+            font-size: 28px;
+            font-weight: 600;
+            padding: 8px;
+        }
+        QLineEdit {
+            min-height: 42px;
+            padding: 0 14px;
+            color: #f8fafc;
+            background-color: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            selection-background-color: #2563eb;
+        }
+        QLineEdit:hover { border-color: #64748b; }
+        QLineEdit:focus {
+            border: 2px solid #3b82f6;
+            padding: 0 13px;
+        }
+        QPushButton {
+            min-height: 42px;
+            padding: 0 18px;
+            color: #e2e8f0;
+            background-color: #263449;
+            border: 1px solid #3b4b63;
+            border-radius: 8px;
+            font-weight: 600;
+        }
+        QPushButton:hover { background-color: #334155; }
+        QPushButton:pressed { background-color: #1e293b; }
+        QPushButton:disabled {
+            color: #64748b;
+            background-color: #172033;
+            border-color: #273449;
+        }
+        QPushButton#addRouteButton, QPushButton#searchButton {
+            color: white;
+            background-color: #2563eb;
+            border-color: #3b82f6;
+        }
+        QPushButton#addRouteButton:hover, QPushButton#searchButton:hover {
+            background-color: #1d4ed8;
+        }
+        QPushButton#deleteRouteButton {
+            color: #fecaca;
+            background-color: #451a1a;
+            border-color: #7f1d1d;
+        }
+        QPushButton#deleteRouteButton:hover { background-color: #7f1d1d; }
+        QTableWidget {
+            background-color: #111827;
+            alternate-background-color: #162033;
+            border: 1px solid #334155;
+            border-radius: 10px;
+            padding: 2px;
+            outline: none;
+        }
+        QTableWidget::item {
+            min-height: 42px;
+            padding: 8px 12px;
+            border-bottom: 1px solid #253248;
+        }
+        QTableWidget::item:selected {
+            color: white;
+            background-color: #1d4ed8;
+        }
+        QHeaderView::section {
+            color: #cbd5e1;
+            background-color: #1e293b;
+            border: none;
+            border-bottom: 1px solid #475569;
+            padding: 10px;
+            font-weight: 600;
+        }
+        QScrollBar:vertical {
+            width: 10px;
+            background: #111827;
+            margin: 4px;
+        }
+        QScrollBar::handle:vertical {
+            min-height: 28px;
+            background: #475569;
+            border-radius: 5px;
+        }
+    )"));
 
     // 初始化班次表格
     ui->routeTable->setColumnCount(3);
@@ -63,7 +179,8 @@ Widget::Widget(QWidget *parent)
         ui->departureEdit->clear();
         ui->destinationEdit->clear();
 
-        ui->routeNumberEdit->setFocus(); });
+        ui->routeNumberEdit->setFocus();
+        saveRoutes(); });
     // =========================
     // 修改选中的班次
     // =========================
@@ -165,6 +282,8 @@ Widget::Widget(QWidget *parent)
 
             ui->routeTable->clearSelection();
 
+            saveRoutes();
+
             QMessageBox::information(
                 this,
                 QStringLiteral("修改成功"),
@@ -204,6 +323,7 @@ Widget::Widget(QWidget *parent)
             if (result == QMessageBox::Yes)
             {
                 ui->routeTable->removeRow(currentRow);
+                saveRoutes();
             }
         });
 
@@ -302,8 +422,47 @@ Widget::Widget(QWidget *parent)
         &QLineEdit::returnPressed,
         ui->searchButton,
         &QPushButton::click);
+
+    loadRoutes();
 }
 
+void Widget::saveRoutes() const
+{
+    QSettings settings(QStringLiteral("StudentQtProjects"),
+                       QStringLiteral("BusTicketSystem"));
+    settings.beginWriteArray(QStringLiteral("routes"));
+    for (int row = 0; row < ui->routeTable->rowCount(); ++row)
+    {
+        settings.setArrayIndex(row);
+        settings.setValue(QStringLiteral("number"),
+                          ui->routeTable->item(row, 0)->text());
+        settings.setValue(QStringLiteral("departure"),
+                          ui->routeTable->item(row, 1)->text());
+        settings.setValue(QStringLiteral("destination"),
+                          ui->routeTable->item(row, 2)->text());
+    }
+    settings.endArray();
+}
+
+void Widget::loadRoutes()
+{
+    QSettings settings(QStringLiteral("StudentQtProjects"),
+                       QStringLiteral("BusTicketSystem"));
+    const int count = settings.beginReadArray(QStringLiteral("routes"));
+    for (int index = 0; index < count; ++index)
+    {
+        settings.setArrayIndex(index);
+        const int row = ui->routeTable->rowCount();
+        ui->routeTable->insertRow(row);
+        ui->routeTable->setItem(row, 0, new QTableWidgetItem(
+            settings.value(QStringLiteral("number")).toString()));
+        ui->routeTable->setItem(row, 1, new QTableWidgetItem(
+            settings.value(QStringLiteral("departure")).toString()));
+        ui->routeTable->setItem(row, 2, new QTableWidgetItem(
+            settings.value(QStringLiteral("destination")).toString()));
+    }
+    settings.endArray();
+}
 Widget::~Widget()
 {
     delete ui;

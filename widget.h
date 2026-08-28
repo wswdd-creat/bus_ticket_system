@@ -17,6 +17,9 @@ public:
     ~Widget();
 
 private:
+    void loadRoutes();
+    void saveRoutes() const;
+
     Ui::Widget *ui;
     int editingRow = -1;
 };
