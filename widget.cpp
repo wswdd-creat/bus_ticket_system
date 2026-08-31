@@ -2,7 +2,9 @@
 #include "ui_widget.h"
 
 #include <QAbstractItemView>
+#include <QDateTime>
 #include <QDoubleValidator>
+#include <QFileDialog>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -11,9 +13,15 @@
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QSaveFile>
 #include <QSettings>
 #include <QSpinBox>
+#include <QStyle>
+#include <QStringConverter>
+#include <QTabWidget>
+#include <QTableWidget>
 #include <QTableWidgetItem>
+#include <QTextStream>
 #include <QVBoxLayout>
 #include <QTime>
 
@@ -41,7 +49,7 @@ Widget::Widget(QWidget *parent)
 {
     // 读取 widget.ui，并创建 Designer 中设计的所有控件。
     ui->setupUi(this);
-    setWindowTitle(QStringLiteral("客运售票管理系统 · V0.8"));
+    setWindowTitle(QStringLiteral("客运售票运营中心 · V0.9"));
     setMinimumSize(1100, 650);
 
     ui->verticalLayout_2->setContentsMargins(28, 22, 28, 22);
@@ -98,15 +106,124 @@ Widget::Widget(QWidget *parent)
     ui->routeTable->setAlternatingRowColors(true);
     ui->routeTable->setShowGrid(false);
 
-    // ==================== V0.8 售票中心界面 ====================
-    // 售票区独立放在表格下方：左侧完成交易，右侧展示实时经营统计。
+    // ==================== V0.9 品牌头部与运营驾驶舱 ====================
+    // 隐藏 Designer 的旧标题，用更完整的品牌头部展示系统定位和运行状态。
+    ui->titleLabel->hide();
+    auto *heroPanel = new QFrame(this);
+    heroPanel->setObjectName(QStringLiteral("heroPanel"));
+    auto *heroLayout = new QHBoxLayout(heroPanel);
+    heroLayout->setContentsMargins(22, 16, 22, 16);
+
+    auto *heroTextLayout = new QVBoxLayout;
+    auto *heroTitle = new QLabel(QStringLiteral("客运售票运营中心"), heroPanel);
+    heroTitle->setObjectName(QStringLiteral("heroTitle"));
+    auto *heroSubtitle = new QLabel(
+        QStringLiteral("班次调度 · 票务交易 · 库存预警 · 经营数据一体化"), heroPanel);
+    heroSubtitle->setObjectName(QStringLiteral("heroSubtitle"));
+    heroTextLayout->addWidget(heroTitle);
+    heroTextLayout->addWidget(heroSubtitle);
+
+    auto *systemBadge = new QLabel(QStringLiteral("●  系统运行正常"), heroPanel);
+    systemBadge->setObjectName(QStringLiteral("systemBadge"));
+    systemBadge->setAlignment(Qt::AlignCenter);
+    heroLayout->addLayout(heroTextLayout);
+    heroLayout->addStretch();
+    heroLayout->addWidget(systemBadge);
+    ui->verticalLayout->insertWidget(0, heroPanel);
+
+    // 关键指标使用独立卡片放在页面顶部，让经营状态一眼可见。
+    auto *statsPanel = new QFrame(this);
+    statsPanel->setObjectName(QStringLiteral("statsPanel"));
+    auto *statsLayout = new QHBoxLayout(statsPanel);
+    statsLayout->setContentsMargins(0, 0, 0, 0);
+    statsLayout->setSpacing(12);
+
+    routeCountLabel = new QLabel(statsPanel);
+    remainingTotalLabel = new QLabel(statsPanel);
+    soldTotalLabel = new QLabel(statsPanel);
+    revenueTotalLabel = new QLabel(statsPanel);
+    lowStockLabel = new QLabel(statsPanel);
+    const QList<QPair<QLabel *, QString>> statisticCards{
+        {routeCountLabel, QStringLiteral("routeCard")},
+        {remainingTotalLabel, QStringLiteral("remainingCard")},
+        {soldTotalLabel, QStringLiteral("soldCard")},
+        {revenueTotalLabel, QStringLiteral("revenueCard")},
+        {lowStockLabel, QStringLiteral("warningCard")}};
+    for (const auto &card : statisticCards) {
+        card.first->setObjectName(card.second);
+        card.first->setProperty("statistic", true);
+        card.first->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+        statsLayout->addWidget(card.first, 1);
+    }
+    ui->verticalLayout->insertWidget(1, statsPanel);
+
+    // ==================== V0.9 双页签工作区 ====================
+    // 班次运营和交易流水属于不同任务，用页签分开以减少认知负担。
+    contentTabs = new QTabWidget(this);
+    contentTabs->setObjectName(QStringLiteral("contentTabs"));
+
+    auto *routePage = new QWidget(contentTabs);
+    auto *routePageLayout = new QVBoxLayout(routePage);
+    routePageLayout->setContentsMargins(0, 10, 0, 0);
+    // 必须先用页签替换原布局中的表格，再把表格移动到班次页。
+    if (QLayoutItem *oldItem =
+            ui->verticalLayout->replaceWidget(ui->routeTable, contentTabs)) {
+        delete oldItem;
+    }
+    routePageLayout->addWidget(ui->routeTable);
+    contentTabs->addTab(routePage, QStringLiteral("班次运营"));
+
+    auto *transactionPage = new QWidget(contentTabs);
+    auto *transactionPageLayout = new QVBoxLayout(transactionPage);
+    transactionPageLayout->setContentsMargins(12, 12, 12, 12);
+    transactionPageLayout->setSpacing(10);
+
+    auto *transactionToolbar = new QHBoxLayout;
+    transactionSearchEdit = new QLineEdit(transactionPage);
+    transactionSearchEdit->setObjectName(QStringLiteral("transactionSearchEdit"));
+    transactionSearchEdit->setPlaceholderText(
+        QStringLiteral("搜索时间、类型、班次号、路线或金额"));
+    transactionSearchEdit->setClearButtonEnabled(true);
+    auto *exportButton = new QPushButton(QStringLiteral("导出 CSV"), transactionPage);
+    exportButton->setObjectName(QStringLiteral("exportButton"));
+    auto *clearHistoryButton = new QPushButton(
+        QStringLiteral("清空流水"), transactionPage);
+    clearHistoryButton->setObjectName(QStringLiteral("clearHistoryButton"));
+    exportButton->setIcon(style()->standardIcon(QStyle::SP_DialogSaveButton));
+    clearHistoryButton->setIcon(style()->standardIcon(QStyle::SP_TrashIcon));
+    transactionToolbar->addWidget(transactionSearchEdit, 1);
+    transactionToolbar->addWidget(exportButton);
+    transactionToolbar->addWidget(clearHistoryButton);
+
+    transactionTable = new QTableWidget(transactionPage);
+    transactionTable->setObjectName(QStringLiteral("transactionTable"));
+    transactionTable->setColumnCount(8);
+    transactionTable->setHorizontalHeaderLabels(
+        {QStringLiteral("交易时间"), QStringLiteral("类型"),
+         QStringLiteral("班次号"), QStringLiteral("路线"),
+         QStringLiteral("数量"), QStringLiteral("单价"),
+         QStringLiteral("交易金额"), QStringLiteral("交易后余票")});
+    transactionTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    transactionTable->horizontalHeader()->setMinimumHeight(42);
+    transactionTable->verticalHeader()->setVisible(false);
+    transactionTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    transactionTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    transactionTable->setAlternatingRowColors(true);
+    transactionTable->setShowGrid(false);
+    transactionPageLayout->addLayout(transactionToolbar);
+    transactionPageLayout->addWidget(transactionTable);
+    contentTabs->addTab(transactionPage, QStringLiteral("交易流水"));
+
+    ui->verticalLayout->setStretchFactor(contentTabs, 1);
+
+    // ==================== 售票中心 ====================
     auto *ticketPanel = new QFrame(this);
     ticketPanel->setObjectName(QStringLiteral("ticketPanel"));
     auto *ticketPanelLayout = new QVBoxLayout(ticketPanel);
     ticketPanelLayout->setContentsMargins(18, 14, 18, 14);
     ticketPanelLayout->setSpacing(10);
 
-    auto *ticketTitle = new QLabel(QStringLiteral("售票中心"), ticketPanel);
+    auto *ticketTitle = new QLabel(QStringLiteral("快捷售票台"), ticketPanel);
     ticketTitle->setObjectName(QStringLiteral("ticketPanelTitle"));
     selectedRouteLabel = new QLabel(
         QStringLiteral("请先在表格中选择一个班次，再进行售票或退票。"), ticketPanel);
@@ -115,7 +232,7 @@ Widget::Widget(QWidget *parent)
 
     auto *operationLayout = new QHBoxLayout;
     operationLayout->setSpacing(10);
-    auto *quantityLabel = new QLabel(QStringLiteral("数量"), ticketPanel);
+    auto *quantityLabel = new QLabel(QStringLiteral("交易数量"), ticketPanel);
     ticketQuantitySpin = new QSpinBox(ticketPanel);
     ticketQuantitySpin->setObjectName(QStringLiteral("ticketQuantitySpin"));
     ticketQuantitySpin->setRange(1, 99);
@@ -124,7 +241,6 @@ Widget::Widget(QWidget *parent)
     ticketQuantitySpin->setAlignment(Qt::AlignCenter);
     ticketQuantitySpin->setToolTip(QStringLiteral("本次需要购买或退回的票数"));
 
-    // 使用独立的减号和加号按钮，点击区域更大，也避免原生小箭头在部分样式下失效。
     auto *decreaseQuantityButton = new QPushButton(QStringLiteral("−"), ticketPanel);
     decreaseQuantityButton->setObjectName(QStringLiteral("quantityStepButton"));
     decreaseQuantityButton->setToolTip(QStringLiteral("数量减 1"));
@@ -143,10 +259,10 @@ Widget::Widget(QWidget *parent)
         increaseQuantityButton->setEnabled(value < 99);
     });
 
-    sellTicketButton = new QPushButton(QStringLiteral("售出票"), ticketPanel);
+    sellTicketButton = new QPushButton(QStringLiteral("确认售票"), ticketPanel);
     sellTicketButton->setObjectName(QStringLiteral("sellTicketButton"));
     sellTicketButton->setEnabled(false);
-    refundTicketButton = new QPushButton(QStringLiteral("退回票"), ticketPanel);
+    refundTicketButton = new QPushButton(QStringLiteral("办理退票"), ticketPanel);
     refundTicketButton->setObjectName(QStringLiteral("refundTicketButton"));
     refundTicketButton->setEnabled(false);
 
@@ -158,25 +274,15 @@ Widget::Widget(QWidget *parent)
     operationLayout->addWidget(refundTicketButton);
     operationLayout->addStretch();
 
-    routeCountLabel = new QLabel(ticketPanel);
-    remainingTotalLabel = new QLabel(ticketPanel);
-    soldTotalLabel = new QLabel(ticketPanel);
-    revenueTotalLabel = new QLabel(ticketPanel);
-    for (QLabel *label : {routeCountLabel, remainingTotalLabel,
-                          soldTotalLabel, revenueTotalLabel}) {
-        label->setProperty("statistic", true);
-        operationLayout->addWidget(label);
-    }
-
     ticketPanelLayout->addWidget(ticketTitle);
     ticketPanelLayout->addWidget(selectedRouteLabel);
     ticketPanelLayout->addLayout(operationLayout);
     ui->verticalLayout->addWidget(ticketPanel);
-    ui->verticalLayout->setStretch(2, 1);
 
-    // 表格选择发生变化时刷新售票按钮和班次摘要。
+    // 切换班次时数量重置为 1，防止把上一班次的交易数量误用于下一班次。
     connect(ui->routeTable, &QTableWidget::itemSelectionChanged, this,
             [this] {
+        ticketQuantitySpin->setValue(1);
         const int row = ui->routeTable->selectedItems().isEmpty()
                             ? -1 : ui->routeTable->currentRow();
         updateTicketSelection(row);
@@ -186,141 +292,54 @@ Widget::Widget(QWidget *parent)
     connect(refundTicketButton, &QPushButton::clicked,
             this, &Widget::refundTickets);
 
-    // ---------- 界面美化 ----------
-    // 集中设置窗口、输入框、按钮和表格的深色主题。
-    setStyleSheet(QStringLiteral(R"(
-        QWidget {
-            background-color: #0f172a;
-            color: #e5e7eb;
-            font-family: "Microsoft YaHei UI";
-            font-size: 14px;
+    connect(transactionSearchEdit, &QLineEdit::textChanged,
+            this, &Widget::filterTransactions);
+    connect(exportButton, &QPushButton::clicked,
+            this, &Widget::exportTransactions);
+    connect(clearHistoryButton, &QPushButton::clicked, this, [this] {
+        if (transactionTable->rowCount() == 0) return;
+        if (QMessageBox::question(
+                this, QStringLiteral("确认清空流水"),
+                QStringLiteral("这只会清空交易流水，不会修改班次余票和经营统计。\n"
+                               "确定继续吗？"),
+                QMessageBox::Yes | QMessageBox::No,
+                QMessageBox::No) == QMessageBox::Yes) {
+            transactionTable->setRowCount(0);
+            saveTransactions();
         }
-        QLabel#titleLabel {
-            color: #f8fafc;
-            font-size: 28px;
-            font-weight: 600;
-            padding: 8px;
+    });
+
+    // 流水页只显示流水工具栏；班次管理控件与售票台在运营页显示。
+    const QList<QWidget *> managementWidgets{
+        ui->searchEdit, ui->searchButton, ui->showAllButton,
+        ui->saveEditButton, ui->deleteRouteButton, ui->editRouteButton,
+        ui->routeNumberEdit, ui->departureEdit, ui->destinationEdit,
+        timeEdit, priceEdit, seatsEdit, ui->addRouteButton, ticketPanel};
+    connect(contentTabs, &QTabWidget::currentChanged, this,
+            [managementWidgets](int index) {
+        const bool showManagement = index == 0;
+        for (QWidget *widget : managementWidgets) {
+            widget->setVisible(showManagement);
         }
-        QLineEdit {
-            min-height: 42px;
-            padding: 0 12px;
-            color: #f8fafc;
-            background-color: #1e293b;
-            border: 1px solid #334155;
-            border-radius: 8px;
-            selection-background-color: #2563eb;
-        }
-        QLineEdit:hover { border-color: #64748b; }
-        QLineEdit:focus { border: 2px solid #3b82f6; padding: 0 11px; }
-        QPushButton {
-            min-height: 42px;
-            padding: 0 18px;
-            color: #e2e8f0;
-            background-color: #263449;
-            border: 1px solid #3b4b63;
-            border-radius: 8px;
-            font-weight: 600;
-        }
-        QPushButton:hover { background-color: #334155; }
-        QPushButton:pressed { background-color: #1e293b; }
-        QPushButton:disabled {
-            color: #64748b;
-            background-color: #172033;
-            border-color: #273449;
-        }
-        QPushButton#addRouteButton, QPushButton#searchButton {
-            color: white;
-            background-color: #2563eb;
-            border-color: #3b82f6;
-        }
-        QPushButton#addRouteButton:hover, QPushButton#searchButton:hover {
-            background-color: #1d4ed8;
-        }
-        QPushButton#deleteRouteButton {
-            color: #fecaca;
-            background-color: #451a1a;
-            border-color: #7f1d1d;
-        }
-        QPushButton#deleteRouteButton:hover { background-color: #7f1d1d; }
-        QFrame#ticketPanel {
-            background-color: #172033;
-            border: 1px solid #334155;
-            border-radius: 10px;
-        }
-        QLabel#ticketPanelTitle {
-            color: #f8fafc;
-            font-size: 18px;
-            font-weight: 600;
-        }
-        QLabel#selectedRouteLabel { color: #94a3b8; }
-        QLabel[statistic="true"] {
-            min-width: 112px;
-            padding: 8px 10px;
-            color: #cbd5e1;
-            background-color: #1e293b;
-            border: 1px solid #334155;
-            border-radius: 7px;
-        }
-        QSpinBox {
-            min-height: 40px;
-            min-width: 76px;
-            padding: 0 8px;
-            color: #f8fafc;
-            background-color: #1e293b;
-            border: 1px solid #334155;
-            border-radius: 8px;
-        }
-        QPushButton#quantityStepButton {
-            min-width: 42px;
-            max-width: 42px;
-            padding: 0;
-            font-size: 18px;
-            font-weight: 600;
-        }
-        QPushButton#sellTicketButton {
-            color: white;
-            background-color: #047857;
-            border-color: #059669;
-        }
-        QPushButton#sellTicketButton:hover { background-color: #059669; }
-        QPushButton#refundTicketButton {
-            color: #fde68a;
-            background-color: #422006;
-            border-color: #92400e;
-        }
-        QPushButton#refundTicketButton:hover { background-color: #78350f; }
-        QTableWidget {
-            background-color: #111827;
-            alternate-background-color: #162033;
-            border: 1px solid #334155;
-            border-radius: 10px;
-            padding: 2px;
-            outline: none;
-        }
-        QTableWidget::item {
-            min-height: 42px;
-            padding: 8px 12px;
-            border-bottom: 1px solid #253248;
-        }
-        QTableWidget::item:selected {
-            color: white;
-            background-color: #1d4ed8;
-        }
-        QHeaderView::section {
-            color: #cbd5e1;
-            background-color: #1e293b;
-            border: none;
-            border-bottom: 1px solid #475569;
-            padding: 10px;
-            font-weight: 600;
-        }
-        QScrollBar:vertical { width: 10px; background: #111827; margin: 4px; }
-        QScrollBar::handle:vertical {
-            min-height: 28px;
-            background: #475569;
-            border-radius: 5px;
-        }
-    )"));
+    });
+
+    // ==================== 按钮图标与交互提示 ====================
+    // 使用 Qt 标准图标，不依赖外部图片，并保留所有现有 objectName。
+    ui->searchButton->setIcon(style()->standardIcon(QStyle::SP_FileDialogContentsView));
+    ui->showAllButton->setIcon(style()->standardIcon(QStyle::SP_BrowserReload));
+    ui->addRouteButton->setIcon(style()->standardIcon(QStyle::SP_DialogApplyButton));
+    ui->saveEditButton->setIcon(style()->standardIcon(QStyle::SP_DialogSaveButton));
+    ui->editRouteButton->setIcon(style()->standardIcon(QStyle::SP_FileDialogDetailedView));
+    ui->deleteRouteButton->setIcon(style()->standardIcon(QStyle::SP_TrashIcon));
+    sellTicketButton->setIcon(style()->standardIcon(QStyle::SP_DialogApplyButton));
+    refundTicketButton->setIcon(style()->standardIcon(QStyle::SP_ArrowBack));
+
+    ui->searchButton->setToolTip(QStringLiteral("按条件筛选班次"));
+    ui->showAllButton->setToolTip(QStringLiteral("清除条件并显示全部班次"));
+    sellTicketButton->setToolTip(QStringLiteral("为当前选中班次售票"));
+    refundTicketButton->setToolTip(QStringLiteral("为当前选中班次退票"));
+
+    // 全局视觉样式由 main.cpp 从 :/bus_ticket_system/styles/app.qss 统一加载。
 
     const auto clearInputs = [this, timeEdit, priceEdit, seatsEdit] {
         ui->routeNumberEdit->clear();
@@ -536,22 +555,47 @@ void Widget::updateStatistics()
 {
     int remainingTotal = 0;
     int soldTotal = 0;
+    int lowStockCount = 0;
     double revenueTotal = 0.0;
+
     for (int row = 0; row < ui->routeTable->rowCount(); ++row) {
-        remainingTotal += ui->routeTable->item(row, Remaining)->text().toInt();
+        auto *remainingItem = ui->routeTable->item(row, Remaining);
+        const int remaining = remainingItem->text().toInt();
+        remainingTotal += remaining;
+
         const auto *numberItem = ui->routeTable->item(row, Number);
         soldTotal += numberItem->data(SoldRole).toInt();
         revenueTotal += numberItem->data(RevenueRole).toDouble();
+
+        // 余票 0 标记为售罄，1～5 标记为库存紧张；文字提示避免只靠颜色表达。
+        QFont stockFont = remainingItem->font();
+        stockFont.setBold(remaining <= 5);
+        remainingItem->setFont(stockFont);
+        if (remaining == 0) {
+            ++lowStockCount;
+            remainingItem->setForeground(QColor(QStringLiteral("#ff7b86")));
+            remainingItem->setToolTip(QStringLiteral("售罄：该班次已无余票"));
+        } else if (remaining <= 5) {
+            ++lowStockCount;
+            remainingItem->setForeground(QColor(QStringLiteral("#f5c15d")));
+            remainingItem->setToolTip(
+                QStringLiteral("库存紧张：仅剩 %1 张").arg(remaining));
+        } else {
+            remainingItem->setForeground(QColor(QStringLiteral("#d8e7f7")));
+            remainingItem->setToolTip(QStringLiteral("库存充足"));
+        }
     }
 
     routeCountLabel->setText(
-        QStringLiteral("班次 %1").arg(ui->routeTable->rowCount()));
+        QStringLiteral("运营班次\n%1 个").arg(ui->routeTable->rowCount()));
     remainingTotalLabel->setText(
-        QStringLiteral("总余票 %1").arg(remainingTotal));
+        QStringLiteral("可售余票\n%1 张").arg(remainingTotal));
     soldTotalLabel->setText(
-        QStringLiteral("累计售票 %1").arg(soldTotal));
+        QStringLiteral("累计售票\n%1 张").arg(soldTotal));
     revenueTotalLabel->setText(
-        QStringLiteral("营业额 ¥%1").arg(revenueTotal, 0, 'f', 2));
+        QStringLiteral("累计营业额\n¥%1").arg(revenueTotal, 0, 'f', 2));
+    lowStockLabel->setText(
+        QStringLiteral("库存预警\n%1 个班次").arg(lowStockCount));
 }
 
 // 售票：检查库存，确认交易后扣减余票，并累计销量与营业额。
@@ -593,6 +637,8 @@ void Widget::sellTickets()
                         numberItem->data(SoldRole).toInt() + quantity);
     numberItem->setData(RevenueRole,
                         numberItem->data(RevenueRole).toDouble() + amount);
+    recordTransaction(QStringLiteral("售票"), row, quantity, price,
+                      amount, remaining - quantity);
     saveRoutes();
     updateStatistics();
     updateTicketSelection(row);
@@ -642,6 +688,8 @@ void Widget::refundTickets()
     numberItem->setData(
         RevenueRole,
         qMax(0.0, numberItem->data(RevenueRole).toDouble() - amount));
+    recordTransaction(QStringLiteral("退票"), row, -quantity, price,
+                      -amount, remainingItem->text().toInt());
     saveRoutes();
     updateStatistics();
     updateTicketSelection(row);
@@ -649,6 +697,164 @@ void Widget::refundTickets()
         this, QStringLiteral("退票成功"),
         QStringLiteral("已退回 %1 张票，应退 ¥%2。")
             .arg(quantity).arg(amount, 0, 'f', 2));
+}
+
+// ==================== V0.9 交易流水 ====================
+// 每次售票或退票都生成一条不可编辑的流水，便于追踪运营过程。
+void Widget::recordTransaction(const QString &type, int routeRow,
+                               int quantity, double unitPrice,
+                               double amount, int remaining)
+{
+    const int row = 0;
+    transactionTable->insertRow(row);
+    const QString routeNumber =
+        ui->routeTable->item(routeRow, Number)->text();
+    const QString journey =
+        QStringLiteral("%1 → %2")
+            .arg(ui->routeTable->item(routeRow, Departure)->text(),
+                 ui->routeTable->item(routeRow, Destination)->text());
+
+    const QStringList values{
+        QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")),
+        type,
+        routeNumber,
+        journey,
+        QString::number(quantity),
+        QStringLiteral("¥%1").arg(unitPrice, 0, 'f', 2),
+        QStringLiteral("%1¥%2")
+            .arg(amount < 0 ? QStringLiteral("-") : QString())
+            .arg(qAbs(amount), 0, 'f', 2),
+        QString::number(remaining)};
+
+    for (int column = 0; column < values.size(); ++column) {
+        auto *item = new QTableWidgetItem(values.at(column));
+        item->setTextAlignment(Qt::AlignCenter);
+        transactionTable->setItem(row, column, item);
+    }
+    transactionTable->item(row, 1)->setForeground(
+        QColor(type == QStringLiteral("售票")
+                   ? QStringLiteral("#6ee7b7")
+                   : QStringLiteral("#fcd34d")));
+    saveTransactions();
+    filterTransactions();
+}
+
+// 将交易流水写入独立的 QSettings 数组，不与班次数据混在一起。
+void Widget::saveTransactions() const
+{
+    QSettings settings(QStringLiteral("StudentQtProjects"),
+                       QStringLiteral("BusTicketSystem"));
+    settings.beginWriteArray(QStringLiteral("transactions"));
+    for (int row = 0; row < transactionTable->rowCount(); ++row) {
+        settings.setArrayIndex(row);
+        for (int column = 0; column < transactionTable->columnCount(); ++column) {
+            settings.setValue(
+                QStringLiteral("column%1").arg(column),
+                transactionTable->item(row, column)->text());
+        }
+    }
+    settings.endArray();
+}
+
+// 启动时恢复历史流水；V0.8 没有流水数据时保持空表即可。
+void Widget::loadTransactions()
+{
+    QSettings settings(QStringLiteral("StudentQtProjects"),
+                       QStringLiteral("BusTicketSystem"));
+    const int count =
+        settings.beginReadArray(QStringLiteral("transactions"));
+    for (int row = 0; row < count; ++row) {
+        settings.setArrayIndex(row);
+        transactionTable->insertRow(row);
+        for (int column = 0; column < transactionTable->columnCount(); ++column) {
+            auto *item = new QTableWidgetItem(
+                settings.value(QStringLiteral("column%1").arg(column)).toString());
+            item->setTextAlignment(Qt::AlignCenter);
+            transactionTable->setItem(row, column, item);
+        }
+        if (transactionTable->item(row, 1)) {
+            transactionTable->item(row, 1)->setForeground(
+                QColor(transactionTable->item(row, 1)->text()
+                               == QStringLiteral("售票")
+                           ? QStringLiteral("#6ee7b7")
+                           : QStringLiteral("#fcd34d")));
+        }
+    }
+    settings.endArray();
+}
+
+// 流水搜索支持任意列关键词，输入内容后即时过滤。
+void Widget::filterTransactions()
+{
+    const QString keyword = transactionSearchEdit->text().trimmed();
+    for (int row = 0; row < transactionTable->rowCount(); ++row) {
+        bool matched = keyword.isEmpty();
+        for (int column = 0;
+             !matched && column < transactionTable->columnCount(); ++column) {
+            const auto *item = transactionTable->item(row, column);
+            matched = item
+                      && item->text().contains(keyword, Qt::CaseInsensitive);
+        }
+        transactionTable->setRowHidden(row, !matched);
+    }
+}
+
+// 将当前全部流水导出为 UTF-8 CSV，便于用 Excel 打开或提交报表。
+void Widget::exportTransactions()
+{
+    if (transactionTable->rowCount() == 0) {
+        QMessageBox::information(this, QStringLiteral("没有可导出的数据"),
+                                 QStringLiteral("当前交易流水为空。"));
+        return;
+    }
+
+    const QString defaultName =
+        QStringLiteral("交易流水_%1.csv")
+            .arg(QDateTime::currentDateTime()
+                     .toString(QStringLiteral("yyyyMMdd_HHmmss")));
+    const QString path = QFileDialog::getSaveFileName(
+        this, QStringLiteral("导出交易流水"), defaultName,
+        QStringLiteral("CSV 文件 (*.csv)"));
+    if (path.isEmpty()) return;
+
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QMessageBox::warning(this, QStringLiteral("导出失败"),
+                             QStringLiteral("无法写入所选文件。"));
+        return;
+    }
+
+    QTextStream stream(&file);
+    stream.setEncoding(QStringConverter::Utf8);
+    stream << QChar(0xFEFF);
+    const auto escapeCsv = [](QString value) {
+        value.replace(QChar('"'), QStringLiteral("\"\""));
+        return QStringLiteral("\"%1\"").arg(value);
+    };
+
+    for (int column = 0; column < transactionTable->columnCount(); ++column) {
+        if (column > 0) stream << ',';
+        stream << escapeCsv(
+            transactionTable->horizontalHeaderItem(column)->text());
+    }
+    stream << '\n';
+
+    for (int row = 0; row < transactionTable->rowCount(); ++row) {
+        for (int column = 0; column < transactionTable->columnCount(); ++column) {
+            if (column > 0) stream << ',';
+            stream << escapeCsv(transactionTable->item(row, column)->text());
+        }
+        stream << '\n';
+    }
+
+    if (!file.commit()) {
+        QMessageBox::warning(this, QStringLiteral("导出失败"),
+                             QStringLiteral("保存 CSV 文件时发生错误。"));
+        return;
+    }
+    QMessageBox::information(
+        this, QStringLiteral("导出成功"),
+        QStringLiteral("交易流水已保存到：\n%1").arg(path));
 }
 
 // ==================== 自动保存数据 ====================

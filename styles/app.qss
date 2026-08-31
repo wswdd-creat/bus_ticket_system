@@ -1,0 +1,337 @@
+/* ==================== 全局基础：统一字体、前景色与浅灰工作区 ==================== */
+QWidget {
+    color: #1f2937;
+    background-color: #f3f6fa;
+    font-family: "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+    font-size: 15px;
+}
+
+/* ==================== 工具提示：提高按钮用途的可发现性 ==================== */
+QToolTip {
+    color: #ffffff;
+    background-color: #173b67;
+    border: 1px solid #2f6eaa;
+    border-radius: 5px;
+    padding: 6px 9px;
+}
+
+/* ==================== 品牌头部：深蓝色建立铁路与航司业务的可信感 ==================== */
+QFrame#heroPanel {
+    background-color: #123c69;
+    border: 1px solid #0d3158;
+    border-radius: 14px;
+}
+QLabel#heroTitle {
+    color: #ffffff;
+    background: transparent;
+    font-size: 30px;
+    font-weight: 700;
+}
+QLabel#heroSubtitle {
+    color: #dbeafe;
+    background: transparent;
+    font-size: 14px;
+}
+QLabel#systemBadge {
+    min-width: 150px;
+    padding: 9px 15px;
+    color: #dcfce7;
+    background-color: #17674a;
+    border: 1px solid #34a77a;
+    border-radius: 18px;
+    font-weight: 600;
+}
+
+/* ==================== 统计卡片容器：保持透明，让卡片自然悬浮在工作区 ==================== */
+QFrame#statsPanel {
+    background: transparent;
+    border: none;
+}
+
+/* ==================== 统计卡片：白底、细描边与语义色左边框 ==================== */
+QLabel[statistic="true"] {
+    min-height: 74px;
+    padding: 12px 16px;
+    color: #243b53;
+    background-color: #ffffff;
+    border: 1px solid #d7e1ec;
+    border-radius: 12px;
+    font-size: 16px;
+    font-weight: 600;
+}
+QLabel#routeCard {
+    border-left: 5px solid #2563a6;
+}
+QLabel#remainingCard {
+    border-left: 5px solid #08967d;
+}
+QLabel#soldCard {
+    border-left: 5px solid #6d5bd0;
+}
+QLabel#revenueCard {
+    border-left: 5px solid #d58b18;
+}
+QLabel#warningCard {
+    border-left: 5px solid #d84c58;
+}
+
+/* ==================== 输入控件：统一高度、圆角和蓝色焦点反馈 ==================== */
+QLineEdit, QSpinBox {
+    min-height: 42px;
+    padding: 0 12px;
+    color: #162b40;
+    background-color: #ffffff;
+    border: 1px solid #bdcada;
+    border-radius: 8px;
+    selection-color: #ffffff;
+    selection-background-color: #1f67ad;
+}
+QLineEdit:hover, QSpinBox:hover {
+    border-color: #6f91b5;
+}
+QLineEdit:focus, QSpinBox:focus {
+    border: 2px solid #1f67ad;
+    padding: 0 11px;
+}
+QLineEdit:disabled, QSpinBox:disabled {
+    color: #8a98a8;
+    background-color: #edf1f5;
+    border-color: #d5dde6;
+}
+
+/* ==================== 微调框按钮：数量增减区保持清晰的点击边界 ==================== */
+QSpinBox::up-button, QSpinBox::down-button {
+    width: 26px;
+    background-color: #e9f0f7;
+    border-left: 1px solid #c4d0dd;
+}
+QSpinBox::up-button:hover, QSpinBox::down-button:hover {
+    background-color: #d7e7f6;
+}
+
+/* ==================== 通用按钮：中性浅蓝表面与完整状态反馈 ==================== */
+QPushButton {
+    min-height: 42px;
+    padding: 0 17px;
+    color: #173b67;
+    background-color: #edf3f9;
+    border: 1px solid #b8c8d9;
+    border-radius: 8px;
+    font-weight: 600;
+}
+QPushButton:hover {
+    color: #0d3158;
+    background-color: #dceaf7;
+    border-color: #7ea3c7;
+}
+QPushButton:pressed {
+    background-color: #c9dced;
+    border-color: #4f82b4;
+}
+QPushButton:disabled {
+    color: #9ba8b5;
+    background-color: #edf0f3;
+    border-color: #d7dde4;
+}
+
+/* ==================== 主操作按钮：搜索、添加、售票与导出使用品牌蓝 ==================== */
+QPushButton#searchButton,
+QPushButton#addRouteButton,
+QPushButton#sellTicketButton,
+QPushButton#exportButton {
+    color: #ffffff;
+    background-color: #1f67ad;
+    border-color: #185791;
+}
+QPushButton#searchButton:hover,
+QPushButton#addRouteButton:hover,
+QPushButton#sellTicketButton:hover,
+QPushButton#exportButton:hover {
+    background-color: #185791;
+    border-color: #104573;
+}
+QPushButton#searchButton:pressed,
+QPushButton#addRouteButton:pressed,
+QPushButton#sellTicketButton:pressed,
+QPushButton#exportButton:pressed {
+    background-color: #103f69;
+}
+
+/* ==================== 编辑操作：保存和修改使用稳重的青蓝语义 ==================== */
+QPushButton#saveEditButton,
+QPushButton#editRouteButton {
+    color: #075f57;
+    background-color: #e6f6f3;
+    border-color: #80c9be;
+}
+QPushButton#saveEditButton:hover,
+QPushButton#editRouteButton:hover {
+    color: #ffffff;
+    background-color: #0f7c70;
+    border-color: #09665d;
+}
+
+/* ==================== 危险操作：删除与清空使用克制的红色警示 ==================== */
+QPushButton#deleteRouteButton,
+QPushButton#clearHistoryButton {
+    color: #a12835;
+    background-color: #fff0f1;
+    border-color: #e5a0a7;
+}
+QPushButton#deleteRouteButton:hover,
+QPushButton#clearHistoryButton:hover {
+    color: #ffffff;
+    background-color: #c53c4b;
+    border-color: #a92d3a;
+}
+
+/* ==================== 退票操作：橙色用于区别售票和破坏性删除 ==================== */
+QPushButton#refundTicketButton {
+    color: #8a4e00;
+    background-color: #fff4dc;
+    border-color: #e6bd74;
+}
+QPushButton#refundTicketButton:hover {
+    color: #ffffff;
+    background-color: #c8790c;
+    border-color: #a86309;
+}
+
+/* ==================== 数量快捷按钮：紧凑方形样式强化可点击感 ==================== */
+QPushButton#quantityStepButton {
+    min-width: 42px;
+    max-width: 42px;
+    padding: 0;
+    color: #173b67;
+    background-color: #e4eef8;
+    font-size: 18px;
+    font-weight: 700;
+}
+
+/* ==================== 售票中心：白色业务卡片与品牌色标题 ==================== */
+QFrame#ticketPanel {
+    background-color: #ffffff;
+    border: 1px solid #c7d7e6;
+    border-radius: 12px;
+}
+QLabel#ticketPanelTitle {
+    color: #123c69;
+    background: transparent;
+    font-size: 21px;
+    font-weight: 700;
+}
+QLabel#selectedRouteLabel {
+    color: #335b7d;
+    background-color: #edf5fc;
+    border: 1px solid #c8ddee;
+    border-radius: 7px;
+    padding: 8px 12px;
+}
+
+/* ==================== 页签导航：当前任务突出，非当前任务保持克制 ==================== */
+QTabWidget#contentTabs::pane {
+    background-color: #ffffff;
+    border: 1px solid #c7d5e4;
+    border-radius: 10px;
+    top: -1px;
+}
+QTabBar::tab {
+    min-width: 150px;
+    min-height: 42px;
+    padding: 0 20px;
+    color: #536b82;
+    background-color: #e7edf4;
+    border: 1px solid #c7d5e4;
+    border-bottom: none;
+    border-top-left-radius: 9px;
+    border-top-right-radius: 9px;
+    font-weight: 600;
+}
+QTabBar::tab:selected {
+    color: #ffffff;
+    background-color: #123c69;
+    border-color: #123c69;
+}
+QTabBar::tab:hover:!selected {
+    color: #123c69;
+    background-color: #d8e6f3;
+}
+
+/* ==================== 数据表格：斑马纹、无重网格和整行蓝色选中态 ==================== */
+QTableWidget {
+    color: #23384d;
+    background-color: #ffffff;
+    alternate-background-color: #f4f7fb;
+    border: 1px solid #c7d5e4;
+    border-radius: 8px;
+    gridline-color: #dce4ed;
+    outline: none;
+}
+QTableWidget::item {
+    min-height: 42px;
+    padding: 8px 12px;
+    border-bottom: 1px solid #e3e9f0;
+}
+QTableWidget::item:selected {
+    color: #0c365d;
+    background-color: #cfe5f8;
+}
+QTableWidget::item:hover:!selected {
+    background-color: #e8f2fb;
+}
+
+/* ==================== 表头：深蓝底白字形成清晰的数据层级 ==================== */
+QHeaderView::section {
+    color: #ffffff;
+    background-color: #173f6b;
+    border: none;
+    border-right: 1px solid #315b85;
+    border-bottom: 1px solid #0d3158;
+    padding: 10px;
+    font-weight: 700;
+}
+
+/* ==================== 滚动条：收窄视觉重量并保留足够的拖动面积 ==================== */
+QScrollBar:vertical {
+    width: 11px;
+    background: #edf2f7;
+    margin: 3px;
+    border-radius: 5px;
+}
+QScrollBar::handle:vertical {
+    min-height: 30px;
+    background: #91a9c1;
+    border-radius: 5px;
+}
+QScrollBar::handle:vertical:hover {
+    background: #6788a8;
+}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0;
+}
+
+/* ==================== 对话框：让确认、提示和文件操作保持统一浅色主题 ==================== */
+QMessageBox, QFileDialog {
+    background-color: #f5f8fb;
+}
+QMessageBox QLabel, QFileDialog QLabel {
+    color: #22384e;
+    background: transparent;
+}
+
+/* ==================== 菜单与下拉弹层：统一白色表面和蓝色高亮 ==================== */
+QMenu {
+    color: #243b53;
+    background-color: #ffffff;
+    border: 1px solid #c8d4e1;
+    border-radius: 6px;
+    padding: 5px;
+}
+QMenu::item {
+    padding: 7px 24px;
+    border-radius: 4px;
+}
+QMenu::item:selected {
+    color: #ffffff;
+    background-color: #1f67ad;
+}
