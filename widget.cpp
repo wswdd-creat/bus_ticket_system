@@ -3,13 +3,18 @@
 
 #include <QAbstractItemView>
 #include <QDoubleValidator>
+#include <QFrame>
+#include <QHBoxLayout>
 #include <QHeaderView>
 #include <QIntValidator>
+#include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QSettings>
+#include <QSpinBox>
 #include <QTableWidgetItem>
+#include <QVBoxLayout>
 #include <QTime>
 
 // ==================== 表格列定义与通用辅助工具 ====================
@@ -17,6 +22,10 @@
 namespace {
 constexpr int ColumnCount = 6;
 enum Column { Number, Departure, Destination, DepartureTime, Price, Remaining };
+
+// 售票统计保存在“班次号”单元格的自定义数据角色中，不占用可见表格列。
+constexpr int SoldRole = Qt::UserRole + 1;
+constexpr int RevenueRole = Qt::UserRole + 2;
 
 // 按对象名称查找输入框，方便读取程序运行时动态创建的控件。
 QLineEdit *field(QWidget *window, const char *name)
@@ -32,7 +41,7 @@ Widget::Widget(QWidget *parent)
 {
     // 读取 widget.ui，并创建 Designer 中设计的所有控件。
     ui->setupUi(this);
-    setWindowTitle(QStringLiteral("客运售票管理系统 · V0.7"));
+    setWindowTitle(QStringLiteral("客运售票管理系统 · V0.8"));
     setMinimumSize(1100, 650);
 
     ui->verticalLayout_2->setContentsMargins(28, 22, 28, 22);
@@ -88,6 +97,94 @@ Widget::Widget(QWidget *parent)
     ui->routeTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
     ui->routeTable->setAlternatingRowColors(true);
     ui->routeTable->setShowGrid(false);
+
+    // ==================== V0.8 售票中心界面 ====================
+    // 售票区独立放在表格下方：左侧完成交易，右侧展示实时经营统计。
+    auto *ticketPanel = new QFrame(this);
+    ticketPanel->setObjectName(QStringLiteral("ticketPanel"));
+    auto *ticketPanelLayout = new QVBoxLayout(ticketPanel);
+    ticketPanelLayout->setContentsMargins(18, 14, 18, 14);
+    ticketPanelLayout->setSpacing(10);
+
+    auto *ticketTitle = new QLabel(QStringLiteral("售票中心"), ticketPanel);
+    ticketTitle->setObjectName(QStringLiteral("ticketPanelTitle"));
+    selectedRouteLabel = new QLabel(
+        QStringLiteral("请先在表格中选择一个班次，再进行售票或退票。"), ticketPanel);
+    selectedRouteLabel->setObjectName(QStringLiteral("selectedRouteLabel"));
+    selectedRouteLabel->setWordWrap(true);
+
+    auto *operationLayout = new QHBoxLayout;
+    operationLayout->setSpacing(10);
+    auto *quantityLabel = new QLabel(QStringLiteral("数量"), ticketPanel);
+    ticketQuantitySpin = new QSpinBox(ticketPanel);
+    ticketQuantitySpin->setObjectName(QStringLiteral("ticketQuantitySpin"));
+    ticketQuantitySpin->setRange(1, 99);
+    ticketQuantitySpin->setValue(1);
+    ticketQuantitySpin->setButtonSymbols(QAbstractSpinBox::NoButtons);
+    ticketQuantitySpin->setAlignment(Qt::AlignCenter);
+    ticketQuantitySpin->setToolTip(QStringLiteral("本次需要购买或退回的票数"));
+
+    // 使用独立的减号和加号按钮，点击区域更大，也避免原生小箭头在部分样式下失效。
+    auto *decreaseQuantityButton = new QPushButton(QStringLiteral("−"), ticketPanel);
+    decreaseQuantityButton->setObjectName(QStringLiteral("quantityStepButton"));
+    decreaseQuantityButton->setToolTip(QStringLiteral("数量减 1"));
+    decreaseQuantityButton->setEnabled(false);
+    auto *increaseQuantityButton = new QPushButton(QStringLiteral("+"), ticketPanel);
+    increaseQuantityButton->setObjectName(QStringLiteral("quantityStepButton"));
+    increaseQuantityButton->setToolTip(QStringLiteral("数量加 1"));
+
+    connect(decreaseQuantityButton, &QPushButton::clicked,
+            ticketQuantitySpin, &QSpinBox::stepDown);
+    connect(increaseQuantityButton, &QPushButton::clicked,
+            ticketQuantitySpin, &QSpinBox::stepUp);
+    connect(ticketQuantitySpin, &QSpinBox::valueChanged, this,
+            [decreaseQuantityButton, increaseQuantityButton](int value) {
+        decreaseQuantityButton->setEnabled(value > 1);
+        increaseQuantityButton->setEnabled(value < 99);
+    });
+
+    sellTicketButton = new QPushButton(QStringLiteral("售出票"), ticketPanel);
+    sellTicketButton->setObjectName(QStringLiteral("sellTicketButton"));
+    sellTicketButton->setEnabled(false);
+    refundTicketButton = new QPushButton(QStringLiteral("退回票"), ticketPanel);
+    refundTicketButton->setObjectName(QStringLiteral("refundTicketButton"));
+    refundTicketButton->setEnabled(false);
+
+    operationLayout->addWidget(quantityLabel);
+    operationLayout->addWidget(decreaseQuantityButton);
+    operationLayout->addWidget(ticketQuantitySpin);
+    operationLayout->addWidget(increaseQuantityButton);
+    operationLayout->addWidget(sellTicketButton);
+    operationLayout->addWidget(refundTicketButton);
+    operationLayout->addStretch();
+
+    routeCountLabel = new QLabel(ticketPanel);
+    remainingTotalLabel = new QLabel(ticketPanel);
+    soldTotalLabel = new QLabel(ticketPanel);
+    revenueTotalLabel = new QLabel(ticketPanel);
+    for (QLabel *label : {routeCountLabel, remainingTotalLabel,
+                          soldTotalLabel, revenueTotalLabel}) {
+        label->setProperty("statistic", true);
+        operationLayout->addWidget(label);
+    }
+
+    ticketPanelLayout->addWidget(ticketTitle);
+    ticketPanelLayout->addWidget(selectedRouteLabel);
+    ticketPanelLayout->addLayout(operationLayout);
+    ui->verticalLayout->addWidget(ticketPanel);
+    ui->verticalLayout->setStretch(2, 1);
+
+    // 表格选择发生变化时刷新售票按钮和班次摘要。
+    connect(ui->routeTable, &QTableWidget::itemSelectionChanged, this,
+            [this] {
+        const int row = ui->routeTable->selectedItems().isEmpty()
+                            ? -1 : ui->routeTable->currentRow();
+        updateTicketSelection(row);
+    });
+    connect(sellTicketButton, &QPushButton::clicked,
+            this, &Widget::sellTickets);
+    connect(refundTicketButton, &QPushButton::clicked,
+            this, &Widget::refundTickets);
 
     // ---------- 界面美化 ----------
     // 集中设置窗口、输入框、按钮和表格的深色主题。
@@ -145,6 +242,53 @@ Widget::Widget(QWidget *parent)
             border-color: #7f1d1d;
         }
         QPushButton#deleteRouteButton:hover { background-color: #7f1d1d; }
+        QFrame#ticketPanel {
+            background-color: #172033;
+            border: 1px solid #334155;
+            border-radius: 10px;
+        }
+        QLabel#ticketPanelTitle {
+            color: #f8fafc;
+            font-size: 18px;
+            font-weight: 600;
+        }
+        QLabel#selectedRouteLabel { color: #94a3b8; }
+        QLabel[statistic="true"] {
+            min-width: 112px;
+            padding: 8px 10px;
+            color: #cbd5e1;
+            background-color: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 7px;
+        }
+        QSpinBox {
+            min-height: 40px;
+            min-width: 76px;
+            padding: 0 8px;
+            color: #f8fafc;
+            background-color: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 8px;
+        }
+        QPushButton#quantityStepButton {
+            min-width: 42px;
+            max-width: 42px;
+            padding: 0;
+            font-size: 18px;
+            font-weight: 600;
+        }
+        QPushButton#sellTicketButton {
+            color: white;
+            background-color: #047857;
+            border-color: #059669;
+        }
+        QPushButton#sellTicketButton:hover { background-color: #059669; }
+        QPushButton#refundTicketButton {
+            color: #fde68a;
+            background-color: #422006;
+            border-color: #92400e;
+        }
+        QPushButton#refundTicketButton:hover { background-color: #78350f; }
         QTableWidget {
             background-color: #111827;
             alternate-background-color: #162033;
@@ -242,8 +386,12 @@ Widget::Widget(QWidget *parent)
             if (column == Price) display = QStringLiteral("¥%1").arg(display);
             ui->routeTable->setItem(row, column, new QTableWidgetItem(display));
         }
+        // 新班次还没有发生交易，累计销量和营业额均从 0 开始。
+        ui->routeTable->item(row, Number)->setData(SoldRole, 0);
+        ui->routeTable->item(row, Number)->setData(RevenueRole, 0.0);
         clearInputs();
         saveRoutes();
+        updateStatistics();
     });
 
     connect(ui->editRouteButton, &QPushButton::clicked, this,
@@ -298,6 +446,8 @@ Widget::Widget(QWidget *parent)
         ui->deleteRouteButton->setEnabled(true);
         ui->routeTable->clearSelection();
         saveRoutes();
+        updateStatistics();
+        updateTicketSelection(editingRow);
         QMessageBox::information(this, QStringLiteral("修改成功"),
                                  QStringLiteral("班次信息已经更新。"));
     });
@@ -317,6 +467,8 @@ Widget::Widget(QWidget *parent)
                 QMessageBox::No) == QMessageBox::Yes) {
             ui->routeTable->removeRow(row);
             saveRoutes();
+            updateStatistics();
+            updateTicketSelection(-1);
         }
     });
 
@@ -348,6 +500,155 @@ Widget::Widget(QWidget *parent)
 
     // 窗口启动的最后一步：从本地配置文件恢复上次保存的班次。
     loadRoutes();
+    updateStatistics();
+    updateTicketSelection(ui->routeTable->currentRow());
+}
+
+// ==================== V0.8 售票中心业务逻辑 ====================
+// 根据表格当前选中行，展示班次摘要并决定售票、退票按钮是否可用。
+void Widget::updateTicketSelection(int row)
+{
+    if (row < 0 || row >= ui->routeTable->rowCount()) {
+        selectedRouteLabel->setText(
+            QStringLiteral("请先在表格中选择一个班次，再进行售票或退票。"));
+        sellTicketButton->setEnabled(false);
+        refundTicketButton->setEnabled(false);
+        return;
+    }
+
+    const int remaining = ui->routeTable->item(row, Remaining)->text().toInt();
+    const int sold = ui->routeTable->item(row, Number)->data(SoldRole).toInt();
+    selectedRouteLabel->setText(
+        QStringLiteral("已选：%1　%2 → %3　发车 %4　票价 %5　余票 %6　累计已售 %7")
+            .arg(ui->routeTable->item(row, Number)->text(),
+                 ui->routeTable->item(row, Departure)->text(),
+                 ui->routeTable->item(row, Destination)->text(),
+                 ui->routeTable->item(row, DepartureTime)->text(),
+                 ui->routeTable->item(row, Price)->text())
+            .arg(remaining)
+            .arg(sold));
+    sellTicketButton->setEnabled(remaining > 0);
+    refundTicketButton->setEnabled(sold > 0);
+}
+
+// 汇总当前表格中的班次数、总余票、累计销量和累计营业额。
+void Widget::updateStatistics()
+{
+    int remainingTotal = 0;
+    int soldTotal = 0;
+    double revenueTotal = 0.0;
+    for (int row = 0; row < ui->routeTable->rowCount(); ++row) {
+        remainingTotal += ui->routeTable->item(row, Remaining)->text().toInt();
+        const auto *numberItem = ui->routeTable->item(row, Number);
+        soldTotal += numberItem->data(SoldRole).toInt();
+        revenueTotal += numberItem->data(RevenueRole).toDouble();
+    }
+
+    routeCountLabel->setText(
+        QStringLiteral("班次 %1").arg(ui->routeTable->rowCount()));
+    remainingTotalLabel->setText(
+        QStringLiteral("总余票 %1").arg(remainingTotal));
+    soldTotalLabel->setText(
+        QStringLiteral("累计售票 %1").arg(soldTotal));
+    revenueTotalLabel->setText(
+        QStringLiteral("营业额 ¥%1").arg(revenueTotal, 0, 'f', 2));
+}
+
+// 售票：检查库存，确认交易后扣减余票，并累计销量与营业额。
+void Widget::sellTickets()
+{
+    const int row = ui->routeTable->currentRow();
+    if (row < 0) {
+        QMessageBox::information(this, QStringLiteral("提示"),
+                                 QStringLiteral("请先选择需要售票的班次。"));
+        return;
+    }
+
+    const int quantity = ticketQuantitySpin->value();
+    auto *remainingItem = ui->routeTable->item(row, Remaining);
+    auto *numberItem = ui->routeTable->item(row, Number);
+    const int remaining = remainingItem->text().toInt();
+    if (quantity > remaining) {
+        QMessageBox::warning(
+            this, QStringLiteral("余票不足"),
+            QStringLiteral("当前仅剩 %1 张票，无法售出 %2 张。")
+                .arg(remaining).arg(quantity));
+        return;
+    }
+
+    const double price = ui->routeTable->item(row, Price)
+                             ->text().remove(QChar(0x00A5)).toDouble();
+    const double amount = price * quantity;
+    if (QMessageBox::question(
+            this, QStringLiteral("确认售票"),
+            QStringLiteral("班次：%1\n数量：%2 张\n应收：¥%3\n\n确认完成售票吗？")
+                .arg(numberItem->text()).arg(quantity).arg(amount, 0, 'f', 2),
+            QMessageBox::Yes | QMessageBox::No,
+            QMessageBox::No) != QMessageBox::Yes) {
+        return;
+    }
+
+    remainingItem->setText(QString::number(remaining - quantity));
+    numberItem->setData(SoldRole,
+                        numberItem->data(SoldRole).toInt() + quantity);
+    numberItem->setData(RevenueRole,
+                        numberItem->data(RevenueRole).toDouble() + amount);
+    saveRoutes();
+    updateStatistics();
+    updateTicketSelection(row);
+    QMessageBox::information(
+        this, QStringLiteral("售票成功"),
+        QStringLiteral("已售出 %1 张票，应收 ¥%2。")
+            .arg(quantity).arg(amount, 0, 'f', 2));
+}
+
+// 退票：最多只能退回本系统累计售出的数量，并恢复余票和营业额。
+void Widget::refundTickets()
+{
+    const int row = ui->routeTable->currentRow();
+    if (row < 0) {
+        QMessageBox::information(this, QStringLiteral("提示"),
+                                 QStringLiteral("请先选择需要退票的班次。"));
+        return;
+    }
+
+    const int quantity = ticketQuantitySpin->value();
+    auto *remainingItem = ui->routeTable->item(row, Remaining);
+    auto *numberItem = ui->routeTable->item(row, Number);
+    const int sold = numberItem->data(SoldRole).toInt();
+    if (quantity > sold) {
+        QMessageBox::warning(
+            this, QStringLiteral("退票数量错误"),
+            QStringLiteral("该班次累计仅售出 %1 张，无法退回 %2 张。")
+                .arg(sold).arg(quantity));
+        return;
+    }
+
+    const double price = ui->routeTable->item(row, Price)
+                             ->text().remove(QChar(0x00A5)).toDouble();
+    const double amount = price * quantity;
+    if (QMessageBox::question(
+            this, QStringLiteral("确认退票"),
+            QStringLiteral("班次：%1\n数量：%2 张\n应退：¥%3\n\n确认完成退票吗？")
+                .arg(numberItem->text()).arg(quantity).arg(amount, 0, 'f', 2),
+            QMessageBox::Yes | QMessageBox::No,
+            QMessageBox::No) != QMessageBox::Yes) {
+        return;
+    }
+
+    remainingItem->setText(
+        QString::number(remainingItem->text().toInt() + quantity));
+    numberItem->setData(SoldRole, sold - quantity);
+    numberItem->setData(
+        RevenueRole,
+        qMax(0.0, numberItem->data(RevenueRole).toDouble() - amount));
+    saveRoutes();
+    updateStatistics();
+    updateTicketSelection(row);
+    QMessageBox::information(
+        this, QStringLiteral("退票成功"),
+        QStringLiteral("已退回 %1 张票，应退 ¥%2。")
+            .arg(quantity).arg(amount, 0, 'f', 2));
 }
 
 // ==================== 自动保存数据 ====================
@@ -371,6 +672,12 @@ void Widget::saveRoutes() const
                           ui->routeTable->item(row, Price)->text().remove(QChar(0x00A5)));
         settings.setValue(QStringLiteral("remaining"),
                           ui->routeTable->item(row, Remaining)->text());
+        // V0.8 新增：保存每个班次的累计销量和累计营业额。
+        const auto *numberItem = ui->routeTable->item(row, Number);
+        settings.setValue(QStringLiteral("sold"),
+                          numberItem->data(SoldRole).toInt());
+        settings.setValue(QStringLiteral("revenue"),
+                          numberItem->data(RevenueRole).toDouble());
     }
     settings.endArray();
 }
@@ -398,6 +705,11 @@ void Widget::loadRoutes()
             ui->routeTable->setItem(row, column,
                                     new QTableWidgetItem(values.at(column)));
         }
+        // 旧版本没有售票统计时自动使用 0，保证历史数据仍然可以打开。
+        ui->routeTable->item(row, Number)->setData(
+            SoldRole, settings.value(QStringLiteral("sold"), 0).toInt());
+        ui->routeTable->item(row, Number)->setData(
+            RevenueRole, settings.value(QStringLiteral("revenue"), 0.0).toDouble());
     }
     settings.endArray();
 }
