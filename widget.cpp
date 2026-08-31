@@ -6,6 +6,7 @@
 #include <QDoubleValidator>
 #include <QFileDialog>
 #include <QFrame>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QIntValidator>
@@ -13,10 +14,14 @@
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QProgressBar>
 #include <QSaveFile>
 #include <QSettings>
 #include <QSpinBox>
 #include <QStyle>
+#include <QStyleOptionTab>
+#include <QStylePainter>
+#include <QTabBar>
 #include <QStringConverter>
 #include <QTabWidget>
 #include <QTableWidget>
@@ -36,6 +41,71 @@ constexpr int SoldRole = Qt::UserRole + 1;
 constexpr int RevenueRole = Qt::UserRole + 2;
 
 // 按对象名称查找输入框，方便读取程序运行时动态创建的控件。
+
+// ==================== V0.10 横排侧边导航控件 ====================
+// Qt 的 West 页签默认旋转文字；这里保留左侧位置，但按正常阅读方向绘制图标和文字。
+class HorizontalTabBar : public QTabBar
+{
+public:
+    explicit HorizontalTabBar(QWidget *parent = nullptr)
+        : QTabBar(parent)
+    {
+        setFocusPolicy(Qt::StrongFocus);
+        setElideMode(Qt::ElideRight);
+        setUsesScrollButtons(false);
+    }
+
+    QSize tabSizeHint(int index) const override
+    {
+        Q_UNUSED(index);
+        return QSize(178, 58);
+    }
+
+protected:
+    void paintEvent(QPaintEvent *) override
+    {
+        QStylePainter painter(this);
+
+        for (int index = 0; index < count(); ++index) {
+            QStyleOptionTab option;
+            initStyleOption(&option, index);
+
+            // 先交给当前 QSS 绘制选中、悬停和焦点状态的背景。
+            painter.drawControl(QStyle::CE_TabBarTabShape, option);
+
+            QRect contentRect = option.rect.adjusted(16, 0, -12, 0);
+            const QIcon icon = tabIcon(index);
+            if (!icon.isNull()) {
+                const QSize size = iconSize();
+                const QIcon::Mode mode = isTabEnabled(index)
+                                             ? QIcon::Normal : QIcon::Disabled;
+                const QIcon::State state = currentIndex() == index
+                                               ? QIcon::On : QIcon::Off;
+                const QPixmap pixmap = icon.pixmap(size, mode, state);
+                const QRect iconRect(
+                    contentRect.left(),
+                    contentRect.center().y() - size.height() / 2,
+                    size.width(), size.height());
+                painter.drawItemPixmap(iconRect, Qt::AlignCenter, pixmap);
+                contentRect.setLeft(iconRect.right() + 12);
+            }
+
+            // 文字始终水平、左对齐，符合中文桌面软件的自然阅读方向。
+            painter.drawText(contentRect, Qt::AlignLeft | Qt::AlignVCenter,
+                             tabText(index));
+        }
+    }
+};
+
+class NavigationTabWidget : public QTabWidget
+{
+public:
+    explicit NavigationTabWidget(QWidget *parent = nullptr)
+        : QTabWidget(parent)
+    {
+        setTabBar(new HorizontalTabBar(this));
+    }
+};
 QLineEdit *field(QWidget *window, const char *name)
 {
     return window->findChild<QLineEdit *>(QString::fromLatin1(name));
@@ -49,7 +119,7 @@ Widget::Widget(QWidget *parent)
 {
     // 读取 widget.ui，并创建 Designer 中设计的所有控件。
     ui->setupUi(this);
-    setWindowTitle(QStringLiteral("客运售票运营中心 · V0.9"));
+    setWindowTitle(QStringLiteral("客运售票运营中心 · V0.10"));
     setMinimumSize(1100, 650);
 
     ui->verticalLayout_2->setContentsMargins(28, 22, 28, 22);
@@ -157,26 +227,182 @@ Widget::Widget(QWidget *parent)
     }
     ui->verticalLayout->insertWidget(1, statsPanel);
 
-    // ==================== V0.9 双页签工作区 ====================
-    // 班次运营和交易流水属于不同任务，用页签分开以减少认知负担。
-    contentTabs = new QTabWidget(this);
+    // ==================== V0.10 多页面运营工作台 ====================
+    // 采用左侧导航与堆叠页面，把总览、班次、售票和流水拆开，避免功能持续增加后互相拥挤。
+    contentTabs = new NavigationTabWidget(this);
     contentTabs->setObjectName(QStringLiteral("contentTabs"));
+    contentTabs->setTabPosition(QTabWidget::West);
+    contentTabs->setIconSize(QSize(20, 20));
+    contentTabs->setDocumentMode(true);
 
+    // ---------- 页面一：运营总览 ----------
+    // 总览页只展示关键指标、售票率和自动运营建议，并提供常用任务快捷入口。
+    auto *overviewPage = new QWidget(contentTabs);
+    overviewPage->setObjectName(QStringLiteral("overviewPage"));
+    auto *overviewLayout = new QVBoxLayout(overviewPage);
+    overviewLayout->setContentsMargins(18, 18, 18, 18);
+    overviewLayout->setSpacing(16);
+
+    auto *overviewTitle = new QLabel(QStringLiteral("运营总览"), overviewPage);
+    overviewTitle->setObjectName(QStringLiteral("pageTitle"));
+    auto *overviewDescription = new QLabel(
+        QStringLiteral("集中查看班次供给、售票表现、营业收入与库存风险"), overviewPage);
+    overviewDescription->setObjectName(QStringLiteral("pageDescription"));
+    overviewLayout->addWidget(overviewTitle);
+    overviewLayout->addWidget(overviewDescription);
+    overviewLayout->addWidget(statsPanel);
+
+    auto *overviewDetails = new QHBoxLayout;
+    overviewDetails->setSpacing(14);
+
+    auto *healthCard = new QFrame(overviewPage);
+    healthCard->setObjectName(QStringLiteral("overviewPanelCard"));
+    auto *healthLayout = new QVBoxLayout(healthCard);
+    healthLayout->setContentsMargins(20, 18, 20, 18);
+    healthLayout->setSpacing(12);
+    auto *healthTitle = new QLabel(QStringLiteral("运营健康度"), healthCard);
+    healthTitle->setObjectName(QStringLiteral("sectionTitle"));
+    auto *healthCaption = new QLabel(
+        QStringLiteral("售票率根据累计销量与当前余票实时计算"), healthCard);
+    healthCaption->setObjectName(QStringLiteral("sectionDescription"));
+    occupancyProgress = new QProgressBar(healthCard);
+    occupancyProgress->setObjectName(QStringLiteral("occupancyProgress"));
+    occupancyProgress->setRange(0, 100);
+    occupancyProgress->setTextVisible(true);
+    overviewInsightLabel = new QLabel(healthCard);
+    overviewInsightLabel->setObjectName(QStringLiteral("overviewInsightLabel"));
+    overviewInsightLabel->setWordWrap(true);
+    healthLayout->addWidget(healthTitle);
+    healthLayout->addWidget(healthCaption);
+    healthLayout->addWidget(occupancyProgress);
+    healthLayout->addWidget(overviewInsightLabel);
+    healthLayout->addStretch();
+
+    auto *quickCard = new QFrame(overviewPage);
+    quickCard->setObjectName(QStringLiteral("overviewPanelCard"));
+    auto *quickLayout = new QVBoxLayout(quickCard);
+    quickLayout->setContentsMargins(20, 18, 20, 18);
+    quickLayout->setSpacing(10);
+    auto *quickTitle = new QLabel(QStringLiteral("快捷工作入口"), quickCard);
+    quickTitle->setObjectName(QStringLiteral("sectionTitle"));
+    auto *quickCaption = new QLabel(
+        QStringLiteral("按业务任务进入独立页面，减少来回查找"), quickCard);
+    quickCaption->setObjectName(QStringLiteral("sectionDescription"));
+    auto *manageShortcut = new QPushButton(
+        QStringLiteral("进入班次管理"), quickCard);
+    manageShortcut->setObjectName(QStringLiteral("overviewShortcutButton"));
+    auto *ticketShortcut = new QPushButton(
+        QStringLiteral("进入售票中心"), quickCard);
+    ticketShortcut->setObjectName(QStringLiteral("overviewShortcutButton"));
+    auto *historyShortcut = new QPushButton(
+        QStringLiteral("查看交易流水"), quickCard);
+    historyShortcut->setObjectName(QStringLiteral("overviewShortcutButton"));
+    quickLayout->addWidget(quickTitle);
+    quickLayout->addWidget(quickCaption);
+    quickLayout->addWidget(manageShortcut);
+    quickLayout->addWidget(ticketShortcut);
+    quickLayout->addWidget(historyShortcut);
+    quickLayout->addStretch();
+
+    overviewDetails->addWidget(healthCard, 3);
+    overviewDetails->addWidget(quickCard, 2);
+    overviewLayout->addLayout(overviewDetails, 1);
+
+    // ---------- 页面二：班次管理 ----------
+    // 原有班次表格和增删改查逻辑保持不变，仅移动到独立管理页面。
     auto *routePage = new QWidget(contentTabs);
+    routePage->setObjectName(QStringLiteral("routePage"));
     auto *routePageLayout = new QVBoxLayout(routePage);
-    routePageLayout->setContentsMargins(0, 10, 0, 0);
-    // 必须先用页签替换原布局中的表格，再把表格移动到班次页。
+    routePageLayout->setContentsMargins(12, 12, 12, 12);
     if (QLayoutItem *oldItem =
             ui->verticalLayout->replaceWidget(ui->routeTable, contentTabs)) {
         delete oldItem;
     }
-    routePageLayout->addWidget(ui->routeTable);
-    contentTabs->addTab(routePage, QStringLiteral("班次运营"));
 
+    // ==================== 班次管理工具区 ====================
+    // 将搜索、操作按钮和六字段录入表单真正放入班次页面，而不是留在外层布局中。
+    auto *routeTitle = new QLabel(QStringLiteral("班次管理"), routePage);
+    routeTitle->setObjectName(QStringLiteral("pageTitle"));
+    auto *routeDescription = new QLabel(
+        QStringLiteral("维护班次基础资料、发车计划、票价和初始库存"), routePage);
+    routeDescription->setObjectName(QStringLiteral("pageDescription"));
+
+    auto *managementPanel = new QFrame(routePage);
+    managementPanel->setObjectName(QStringLiteral("routeManagementPanel"));
+    auto *managementLayout = new QVBoxLayout(managementPanel);
+    managementLayout->setContentsMargins(16, 16, 16, 16);
+    managementLayout->setSpacing(12);
+
+    // 搜索栏：支持关键词筛选，并可一键恢复全部班次。
+    auto *searchToolbar = new QHBoxLayout;
+    searchToolbar->setSpacing(10);
+    searchToolbar->addWidget(ui->searchEdit, 1);
+    searchToolbar->addWidget(ui->searchButton);
+    searchToolbar->addWidget(ui->showAllButton);
+
+    // 操作栏：修改、保存和删除只针对表格当前选中班次。
+    auto *actionToolbar = new QHBoxLayout;
+    actionToolbar->setSpacing(10);
+    actionToolbar->addWidget(ui->editRouteButton);
+    actionToolbar->addWidget(ui->saveEditButton);
+    actionToolbar->addWidget(ui->deleteRouteButton);
+    actionToolbar->addStretch();
+
+    // 录入区：六项班次字段分成两行，避免超宽输入栏显得拥挤。
+    auto *inputPanel = new QFrame(managementPanel);
+    inputPanel->setObjectName(QStringLiteral("routeInputPanel"));
+    auto *inputGrid = new QGridLayout(inputPanel);
+    inputGrid->setContentsMargins(12, 12, 12, 12);
+    inputGrid->setHorizontalSpacing(10);
+    inputGrid->setVerticalSpacing(10);
+    inputGrid->addWidget(ui->routeNumberEdit, 0, 0);
+    inputGrid->addWidget(ui->departureEdit, 0, 1);
+    inputGrid->addWidget(ui->destinationEdit, 0, 2);
+    inputGrid->addWidget(timeEdit, 0, 3);
+    inputGrid->addWidget(priceEdit, 1, 0);
+    inputGrid->addWidget(seatsEdit, 1, 1);
+    inputGrid->addWidget(ui->addRouteButton, 1, 2, 1, 2);
+
+    managementLayout->addLayout(searchToolbar);
+    managementLayout->addLayout(actionToolbar);
+    managementLayout->addWidget(inputPanel);
+
+    routePageLayout->addWidget(routeTitle);
+    routePageLayout->addWidget(routeDescription);
+    routePageLayout->addWidget(managementPanel);
+    routePageLayout->addWidget(ui->routeTable, 1);
+
+    // ---------- 页面三：售票中心 ----------
+    // 售票页面稍后接收原售票面板；用户从班次页选择后可双击进入。
+    auto *ticketPage = new QWidget(contentTabs);
+    ticketPage->setObjectName(QStringLiteral("ticketPage"));
+    auto *ticketPageLayout = new QVBoxLayout(ticketPage);
+    ticketPageLayout->setContentsMargins(18, 18, 18, 18);
+    ticketPageLayout->setSpacing(14);
+
+    auto *ticketPageTitle = new QLabel(QStringLiteral("售票中心"), ticketPage);
+    ticketPageTitle->setObjectName(QStringLiteral("pageTitle"));
+    auto *ticketPageDescription = new QLabel(
+        QStringLiteral("针对已选班次办理售票与退票，交易结果实时回写库存和经营指标"), ticketPage);
+    ticketPageDescription->setObjectName(QStringLiteral("pageDescription"));
+    ticketPageLayout->addWidget(ticketPageTitle);
+    ticketPageLayout->addWidget(ticketPageDescription);
+
+    // ---------- 页面四：交易流水 ----------
+    // 流水页面保留即时搜索、CSV 导出和清空审计记录功能。
     auto *transactionPage = new QWidget(contentTabs);
+    transactionPage->setObjectName(QStringLiteral("transactionPage"));
     auto *transactionPageLayout = new QVBoxLayout(transactionPage);
     transactionPageLayout->setContentsMargins(12, 12, 12, 12);
     transactionPageLayout->setSpacing(10);
+
+    auto *transactionTitle = new QLabel(QStringLiteral("交易流水"), transactionPage);
+    transactionTitle->setObjectName(QStringLiteral("pageTitle"));
+    auto *transactionDescription = new QLabel(
+        QStringLiteral("追踪每一笔售票与退票记录，支持搜索和导出审计"), transactionPage);
+    transactionDescription->setObjectName(QStringLiteral("pageDescription"));
+    transactionPageLayout->addWidget(transactionTitle);
+    transactionPageLayout->addWidget(transactionDescription);
 
     auto *transactionToolbar = new QHBoxLayout;
     transactionSearchEdit = new QLineEdit(transactionPage);
@@ -212,9 +438,29 @@ Widget::Widget(QWidget *parent)
     transactionTable->setShowGrid(false);
     transactionPageLayout->addLayout(transactionToolbar);
     transactionPageLayout->addWidget(transactionTable);
-    contentTabs->addTab(transactionPage, QStringLiteral("交易流水"));
 
+    contentTabs->addTab(
+        overviewPage, style()->standardIcon(QStyle::SP_ComputerIcon),
+        QStringLiteral("运营总览"));
+    contentTabs->addTab(
+        routePage, style()->standardIcon(QStyle::SP_FileDialogListView),
+        QStringLiteral("班次管理"));
+    contentTabs->addTab(
+        ticketPage, style()->standardIcon(QStyle::SP_DialogApplyButton),
+        QStringLiteral("售票中心"));
+    contentTabs->addTab(
+        transactionPage, style()->standardIcon(QStyle::SP_FileDialogDetailedView),
+        QStringLiteral("交易流水"));
+    contentTabs->setCurrentIndex(0);
     ui->verticalLayout->setStretchFactor(contentTabs, 1);
+
+    // 总览页快捷按钮只负责页面导航，不复制业务逻辑。
+    connect(manageShortcut, &QPushButton::clicked, this,
+            [this] { contentTabs->setCurrentIndex(1); });
+    connect(ticketShortcut, &QPushButton::clicked, this,
+            [this] { contentTabs->setCurrentIndex(2); });
+    connect(historyShortcut, &QPushButton::clicked, this,
+            [this] { contentTabs->setCurrentIndex(3); });
 
     // ==================== 售票中心 ====================
     auto *ticketPanel = new QFrame(this);
@@ -277,7 +523,8 @@ Widget::Widget(QWidget *parent)
     ticketPanelLayout->addWidget(ticketTitle);
     ticketPanelLayout->addWidget(selectedRouteLabel);
     ticketPanelLayout->addLayout(operationLayout);
-    ui->verticalLayout->addWidget(ticketPanel);
+    ticketPageLayout->addWidget(ticketPanel);
+    ticketPageLayout->addStretch();
 
     // 切换班次时数量重置为 1，防止把上一班次的交易数量误用于下一班次。
     connect(ui->routeTable, &QTableWidget::itemSelectionChanged, this,
@@ -309,21 +556,7 @@ Widget::Widget(QWidget *parent)
         }
     });
 
-    // 流水页只显示流水工具栏；班次管理控件与售票台在运营页显示。
-    const QList<QWidget *> managementWidgets{
-        ui->searchEdit, ui->searchButton, ui->showAllButton,
-        ui->saveEditButton, ui->deleteRouteButton, ui->editRouteButton,
-        ui->routeNumberEdit, ui->departureEdit, ui->destinationEdit,
-        timeEdit, priceEdit, seatsEdit, ui->addRouteButton, ticketPanel};
-    connect(contentTabs, &QTabWidget::currentChanged, this,
-            [managementWidgets](int index) {
-        const bool showManagement = index == 0;
-        for (QWidget *widget : managementWidgets) {
-            widget->setVisible(showManagement);
-        }
-    });
-
-    // ==================== 按钮图标与交互提示 ====================
+// ==================== 按钮图标与交互提示 ====================
     // 使用 Qt 标准图标，不依赖外部图片，并保留所有现有 objectName。
     ui->searchButton->setIcon(style()->standardIcon(QStyle::SP_FileDialogContentsView));
     ui->showAllButton->setIcon(style()->standardIcon(QStyle::SP_BrowserReload));
@@ -573,15 +806,15 @@ void Widget::updateStatistics()
         remainingItem->setFont(stockFont);
         if (remaining == 0) {
             ++lowStockCount;
-            remainingItem->setForeground(QColor(QStringLiteral("#ff7b86")));
+            remainingItem->setForeground(QColor(QStringLiteral("#b4232f")));
             remainingItem->setToolTip(QStringLiteral("售罄：该班次已无余票"));
         } else if (remaining <= 5) {
             ++lowStockCount;
-            remainingItem->setForeground(QColor(QStringLiteral("#f5c15d")));
+            remainingItem->setForeground(QColor(QStringLiteral("#a15c00")));
             remainingItem->setToolTip(
                 QStringLiteral("库存紧张：仅剩 %1 张").arg(remaining));
         } else {
-            remainingItem->setForeground(QColor(QStringLiteral("#d8e7f7")));
+            remainingItem->setForeground(QColor(QStringLiteral("#166534")));
             remainingItem->setToolTip(QStringLiteral("库存充足"));
         }
     }
@@ -596,6 +829,39 @@ void Widget::updateStatistics()
         QStringLiteral("累计营业额\n¥%1").arg(revenueTotal, 0, 'f', 2));
     lowStockLabel->setText(
         QStringLiteral("库存预警\n%1 个班次").arg(lowStockCount));
+
+    // ==================== V0.10 运营健康度与自动建议 ====================
+    // 售票率 = 累计销量 ÷（累计销量 + 当前余票），用于衡量整体运力消化情况。
+    const int totalCapacity = soldTotal + remainingTotal;
+    const int sellThroughRate = totalCapacity > 0
+                                    ? qRound(100.0 * soldTotal / totalCapacity)
+                                    : 0;
+    occupancyProgress->setValue(sellThroughRate);
+    occupancyProgress->setFormat(
+        QStringLiteral("整体售票率  %1%").arg(sellThroughRate));
+
+    if (ui->routeTable->rowCount() == 0) {
+        overviewInsightLabel->setText(
+            QStringLiteral("尚未录入班次。请先进入“班次管理”创建运营计划。"));
+        overviewInsightLabel->setProperty("status", QStringLiteral("neutral"));
+    } else if (lowStockCount > 0) {
+        overviewInsightLabel->setText(
+            QStringLiteral("⚠ 当前有 %1 个班次余票不足，请及时关注库存或调整运力。")
+                .arg(lowStockCount));
+        overviewInsightLabel->setProperty("status", QStringLiteral("warning"));
+    } else if (sellThroughRate >= 70) {
+        overviewInsightLabel->setText(
+            QStringLiteral("✓ 整体售票表现良好，当前班次库存均处于安全范围。"));
+        overviewInsightLabel->setProperty("status", QStringLiteral("healthy"));
+    } else {
+        overviewInsightLabel->setText(
+            QStringLiteral("运营平稳。可结合交易流水关注低售票率班次并优化排班。"));
+        overviewInsightLabel->setProperty("status", QStringLiteral("neutral"));
+    }
+
+    // 动态属性改变后重新应用样式，使运营建议的状态色立即刷新。
+    overviewInsightLabel->style()->unpolish(overviewInsightLabel);
+    overviewInsightLabel->style()->polish(overviewInsightLabel);
 }
 
 // 售票：检查库存，确认交易后扣减余票，并累计销量与营业额。

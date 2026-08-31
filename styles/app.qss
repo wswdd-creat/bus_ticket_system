@@ -335,3 +335,129 @@ QMenu::item:selected {
     color: #ffffff;
     background-color: #1f67ad;
 }
+/* ==================== V0.10 左侧导航：四个独立业务页面的统一入口 ==================== */
+QTabWidget#contentTabs::pane {
+    background-color: #ffffff;
+    border: 1px solid #c7d5e4;
+    border-radius: 10px;
+    left: -1px;
+}
+QTabWidget#contentTabs QTabBar::tab {
+    min-width: 156px;
+    max-width: 156px;
+    min-height: 50px;
+    padding: 0 16px;
+    margin: 0 0 6px 0;
+    color: #49637c;
+    background-color: #e8eef5;
+    border: 1px solid #c7d5e4;
+    border-radius: 8px;
+    font-weight: 600;
+    text-align: left;
+}
+QTabWidget#contentTabs QTabBar::tab:selected {
+    color: #ffffff;
+    background-color: #123c69;
+    border-color: #123c69;
+}
+QTabWidget#contentTabs QTabBar::tab:hover:!selected {
+    color: #123c69;
+    background-color: #d5e5f3;
+    border-color: #8cabc8;
+}
+
+/* ==================== V0.10 页面标题：明确当前任务和页面职责 ==================== */
+QLabel#pageTitle {
+    color: #123c69;
+    background: transparent;
+    font-size: 24px;
+    font-weight: 700;
+}
+QLabel#pageDescription {
+    color: #60778e;
+    background: transparent;
+    font-size: 14px;
+}
+
+/* ==================== V0.10 总览功能卡：承载健康度与快捷任务入口 ==================== */
+QFrame#overviewPanelCard {
+    background-color: #ffffff;
+    border: 1px solid #cbd8e5;
+    border-radius: 12px;
+}
+QLabel#sectionTitle {
+    color: #173f6b;
+    background: transparent;
+    font-size: 19px;
+    font-weight: 700;
+}
+QLabel#sectionDescription {
+    color: #6b7f93;
+    background: transparent;
+    font-size: 14px;
+}
+QPushButton#overviewShortcutButton {
+    min-height: 44px;
+    color: #174a78;
+    background-color: #edf5fc;
+    border: 1px solid #bfd4e7;
+    text-align: left;
+    padding-left: 18px;
+}
+QPushButton#overviewShortcutButton:hover {
+    color: #ffffff;
+    background-color: #1f67ad;
+    border-color: #185791;
+}
+
+/* ==================== V0.10 售票率：使用进度条表达运力消化程度 ==================== */
+QProgressBar#occupancyProgress {
+    min-height: 30px;
+    color: #173b67;
+    background-color: #e7edf4;
+    border: 1px solid #c3d1df;
+    border-radius: 8px;
+    text-align: center;
+    font-weight: 700;
+}
+QProgressBar#occupancyProgress::chunk {
+    background-color: #1f67ad;
+    border-radius: 7px;
+}
+
+/* ==================== V0.10 运营建议：颜色与文字共同表达健康、预警和中性状态 ==================== */
+QLabel#overviewInsightLabel {
+    min-height: 52px;
+    padding: 10px 12px;
+    color: #40566c;
+    background-color: #f2f5f8;
+    border: 1px solid #d4dee8;
+    border-radius: 8px;
+}
+QLabel#overviewInsightLabel[status="healthy"] {
+    color: #13613d;
+    background-color: #eaf8f0;
+    border-color: #9fd3b4;
+}
+QLabel#overviewInsightLabel[status="warning"] {
+    color: #8a4e00;
+    background-color: #fff5df;
+    border-color: #e5c17e;
+}
+/* ==================== V0.10 班次管理工具区：搜索、操作与录入形成完整工作台 ==================== */
+QFrame#routeManagementPanel {
+    background-color: #f8fafc;
+    border: 1px solid #c8d6e4;
+    border-radius: 10px;
+}
+QFrame#routeInputPanel {
+    background-color: #eef4fa;
+    border: 1px solid #d2dee9;
+    border-radius: 8px;
+}
+QFrame#routeManagementPanel QLineEdit {
+    min-height: 40px;
+}
+QFrame#routeManagementPanel QPushButton {
+    min-height: 40px;
+}

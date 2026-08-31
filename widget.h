@@ -11,6 +11,7 @@ QT_END_NAMESPACE
 class QLabel;
 class QLineEdit;
 class QPushButton;
+class QProgressBar;
 class QSpinBox;
 class QTableWidget;
 class QTabWidget;
@@ -52,6 +53,8 @@ private:
     QLabel *soldTotalLabel = nullptr;
     QLabel *revenueTotalLabel = nullptr;
     QLabel *lowStockLabel = nullptr;
+    QLabel *overviewInsightLabel = nullptr;
+    QProgressBar *occupancyProgress = nullptr;
     QSpinBox *ticketQuantitySpin = nullptr;
     QPushButton *sellTicketButton = nullptr;
     QPushButton *refundTicketButton = nullptr;
