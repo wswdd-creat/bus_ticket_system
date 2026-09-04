@@ -1,15 +1,15 @@
 #pragma once
 
 #include <QWidget>
+#include <QStringList>
 
 QT_BEGIN_NAMESPACE
-namespace Ui {
-    class Widget;
-}
+namespace Ui { class Widget; }
 QT_END_NAMESPACE
 
 class QLabel;
 class QComboBox;
+class QDateEdit;
 class QLineEdit;
 class QPushButton;
 class QProgressBar;
@@ -26,11 +26,13 @@ public:
     ~Widget();
 
 private:
-    // 班次数据持久化：保存和恢复全部班次及其售票统计。
+    // 班次和站点数据持久化。
     void loadRoutes();
     void saveRoutes() const;
+    void loadStations();
+    void saveStations() const;
 
-    // 售票中心：刷新选中班次、运营指标，并处理售票和退票。
+    // 售票中心、席位库存和经营统计。
     void updateTicketSelection(int row);
     void refreshTicketRouteChoices();
     void refreshTicketSeatChoices();
@@ -40,7 +42,7 @@ private:
     void sellTickets();
     void refundTickets();
 
-    // V0.11 实名订单：校验旅客资料、创建订单并支持按订单安全退票。
+    // 实名订单：组合筛选、退票和改签。
     bool validatePassenger();
     void createOrder(int routeRow, int quantity, double amount,
                      const QString &orderNumber);
@@ -48,10 +50,12 @@ private:
     void loadOrders();
     void filterOrders();
     void refundSelectedOrder();
+    void rescheduleSelectedOrder();
+    void installOrderActionButton(int row);
     int findRouteRow(const QString &routeNumber, const QString &departureDate,
                      const QString &seatType) const;
 
-    // V0.9 交易流水：记录、保存、读取、筛选与导出每次交易。
+    // 交易流水：记录、保存、读取、筛选与导出。
     void recordTransaction(const QString &type, int routeRow,
                            int quantity, double unitPrice,
                            double amount, int remaining);
@@ -67,6 +71,9 @@ private:
     QComboBox *ticketRouteCombo = nullptr;
     QComboBox *ticketSeatCombo = nullptr;
     QComboBox *seatServiceCombo = nullptr;
+    QComboBox *departureStationCombo = nullptr;
+    QComboBox *destinationStationCombo = nullptr;
+    QStringList stationNames;
     QLabel *routeCountLabel = nullptr;
     QLabel *remainingTotalLabel = nullptr;
     QLabel *soldTotalLabel = nullptr;
@@ -77,6 +84,7 @@ private:
     QSpinBox *ticketQuantitySpin = nullptr;
     QPushButton *sellTicketButton = nullptr;
     QPushButton *refundTicketButton = nullptr;
+    QPushButton *toggleRouteStatusButton = nullptr;
     QTableWidget *seatInventoryTable = nullptr;
     QComboBox *seatTypeEditor = nullptr;
     QLineEdit *seatPriceEdit = nullptr;
@@ -89,6 +97,11 @@ private:
     QTableWidget *transactionTable = nullptr;
     QLineEdit *transactionSearchEdit = nullptr;
     QTableWidget *orderTable = nullptr;
-    QLineEdit *orderSearchEdit = nullptr;
+    QLineEdit *orderPassengerFilterEdit = nullptr;
+    QLineEdit *orderRouteFilterEdit = nullptr;
+    QComboBox *orderStatusFilterCombo = nullptr;
+    QDateEdit *orderStartDateEdit = nullptr;
+    QDateEdit *orderEndDateEdit = nullptr;
     QPushButton *refundOrderButton = nullptr;
+    QPushButton *rescheduleOrderButton = nullptr;
 };

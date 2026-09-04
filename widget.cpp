@@ -6,6 +6,9 @@
 #include <QCompleter>
 #include <QDateEdit>
 #include <QDateTime>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QFormLayout>
 #include <QDoubleValidator>
 #include <QFileDialog>
 #include <QFrame>
@@ -13,6 +16,7 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QIntValidator>
+#include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
@@ -39,10 +43,10 @@
 // ==================== 表格列定义与通用辅助工具 ====================
 // 用枚举代替数字下标，后续看到 Number、Price 等名称就能知道对应哪一列。
 namespace {
-constexpr int ColumnCount = 10;
+constexpr int ColumnCount = 11;
 enum Column {
     Number, DepartureDate, Departure, Destination, DepartureTime,
-    ArrivalTime, SeatType, Price, TotalSeats, Remaining
+    ArrivalTime, SeatType, Price, TotalSeats, Remaining, Status
 };
 
 // 售票统计保存在“班次号”单元格的自定义数据角色中，不占用可见表格列。
@@ -201,7 +205,8 @@ Widget::Widget(QWidget *parent)
          QStringLiteral("出发地"), QStringLiteral("目的地"),
          QStringLiteral("发车时间"), QStringLiteral("到达时间"),
          QStringLiteral("席位"), QStringLiteral("票价"),
-         QStringLiteral("座位数"), QStringLiteral("余票")});
+         QStringLiteral("座位数"), QStringLiteral("余票"),
+         QStringLiteral("状态")});
     ui->routeTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     ui->routeTable->horizontalHeader()->setMinimumHeight(42);
     ui->routeTable->verticalHeader()->setVisible(false);
@@ -211,7 +216,7 @@ Widget::Widget(QWidget *parent)
     ui->routeTable->setAlternatingRowColors(true);
     ui->routeTable->setShowGrid(false);
     // 班次管理只显示班次本身；席位、价格和库存移到独立的席位库存页面。
-    for (int column = SeatType; column < ColumnCount; ++column) {
+    for (int column = SeatType; column <= Remaining; ++column) {
         ui->routeTable->setColumnHidden(column, true);
     }
 
@@ -385,6 +390,13 @@ Widget::Widget(QWidget *parent)
     actionToolbar->addWidget(ui->editRouteButton);
     actionToolbar->addWidget(ui->saveEditButton);
     actionToolbar->addWidget(ui->deleteRouteButton);
+    toggleRouteStatusButton = new QPushButton(QStringLiteral("停用班次"), managementPanel);
+    toggleRouteStatusButton->setObjectName(QStringLiteral("toggleRouteStatusButton"));
+    toggleRouteStatusButton->setEnabled(false);
+    auto *addStationButton = new QPushButton(QStringLiteral("新增站点"), managementPanel);
+    addStationButton->setObjectName(QStringLiteral("addStationButton"));
+    actionToolbar->addWidget(toggleRouteStatusButton);
+    actionToolbar->addWidget(addStationButton);
     actionToolbar->addStretch();
 
     // 录入区只维护班次基础信息，不再要求调度人员同时填写席位和票价。
@@ -394,10 +406,35 @@ Widget::Widget(QWidget *parent)
     inputGrid->setContentsMargins(12, 12, 12, 12);
     inputGrid->setHorizontalSpacing(10);
     inputGrid->setVerticalSpacing(10);
+    // 地名列分配更多横向空间，窗口缩放时优先保证站点名称完整可读。
+    inputGrid->setColumnStretch(0, 2);
+    inputGrid->setColumnStretch(1, 2);
+    inputGrid->setColumnStretch(2, 3);
+    inputGrid->setColumnStretch(3, 3);
     inputGrid->addWidget(ui->routeNumberEdit, 0, 0);
     inputGrid->addWidget(dateEdit, 0, 1);
-    inputGrid->addWidget(ui->departureEdit, 0, 2);
-    inputGrid->addWidget(ui->destinationEdit, 0, 3);
+    // 站点采用可搜索下拉框，原 Designer 输入框保留但隐藏，避免破坏 objectName。
+    ui->departureEdit->hide();
+    ui->destinationEdit->hide();
+    departureStationCombo = new QComboBox(inputPanel);
+    departureStationCombo->setObjectName(QStringLiteral("departureStationCombo"));
+    departureStationCombo->setEditable(true);
+    departureStationCombo->setInsertPolicy(QComboBox::NoInsert);
+    departureStationCombo->setMinimumWidth(190);
+    departureStationCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    departureStationCombo->setMinimumContentsLength(10);
+    departureStationCombo->lineEdit()->setPlaceholderText(QStringLiteral("选择出发站"));
+    destinationStationCombo = new QComboBox(inputPanel);
+    destinationStationCombo->setObjectName(QStringLiteral("destinationStationCombo"));
+    destinationStationCombo->setEditable(true);
+    destinationStationCombo->setInsertPolicy(QComboBox::NoInsert);
+    destinationStationCombo->setMinimumWidth(190);
+    destinationStationCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    destinationStationCombo->setMinimumContentsLength(10);
+    destinationStationCombo->lineEdit()->setPlaceholderText(QStringLiteral("选择目的站"));
+    loadStations();
+    inputGrid->addWidget(departureStationCombo, 0, 2);
+    inputGrid->addWidget(destinationStationCombo, 0, 3);
     inputGrid->addWidget(timeEdit, 1, 0);
     inputGrid->addWidget(arrivalTimeEdit, 1, 1);
     inputGrid->addWidget(ui->addRouteButton, 1, 2, 1, 2);
@@ -596,31 +633,79 @@ Widget::Widget(QWidget *parent)
     orderPageLayout->addWidget(orderTitle);
     orderPageLayout->addWidget(orderDescription);
 
-    auto *orderToolbar = new QHBoxLayout;
-    orderSearchEdit = new QLineEdit(orderPage);
-    orderSearchEdit->setObjectName(QStringLiteral("orderSearchEdit"));
-    orderSearchEdit->setPlaceholderText(
-        QStringLiteral("搜索订单号、旅客、手机号、班次或状态"));
-    orderSearchEdit->setClearButtonEnabled(true);
-    refundOrderButton = new QPushButton(
-        QStringLiteral("按订单退票"), orderPage);
+    // 订单组合筛选：按旅客、状态、车次和下单日期范围精确缩小结果。
+    auto *orderFilterPanel = new QFrame(orderPage);
+    orderFilterPanel->setObjectName(QStringLiteral("orderFilterPanel"));
+    auto *orderFilterLayout = new QGridLayout(orderFilterPanel);
+    orderFilterLayout->setContentsMargins(14, 12, 14, 12);
+    orderFilterLayout->setHorizontalSpacing(10);
+    orderFilterLayout->setVerticalSpacing(8);
+
+    orderPassengerFilterEdit = new QLineEdit(orderFilterPanel);
+    orderPassengerFilterEdit->setObjectName(QStringLiteral("orderPassengerFilterEdit"));
+    orderPassengerFilterEdit->setPlaceholderText(QStringLiteral("旅客姓名 / 手机号"));
+    orderPassengerFilterEdit->setClearButtonEnabled(true);
+    orderStatusFilterCombo = new QComboBox(orderFilterPanel);
+    orderStatusFilterCombo->setObjectName(QStringLiteral("orderStatusFilterCombo"));
+    orderStatusFilterCombo->addItems({QStringLiteral("全部状态"), QStringLiteral("已出票"),
+                                     QStringLiteral("已退票"), QStringLiteral("已取消")});
+    orderRouteFilterEdit = new QLineEdit(orderFilterPanel);
+    orderRouteFilterEdit->setObjectName(QStringLiteral("orderRouteFilterEdit"));
+    orderRouteFilterEdit->setPlaceholderText(QStringLiteral("车次号"));
+    orderRouteFilterEdit->setClearButtonEnabled(true);
+    orderStartDateEdit = new QDateEdit(orderFilterPanel);
+    orderStartDateEdit->setObjectName(QStringLiteral("orderStartDateEdit"));
+    orderStartDateEdit->setCalendarPopup(true);
+    orderStartDateEdit->setDisplayFormat(QStringLiteral("yyyy-MM-dd"));
+    orderStartDateEdit->setDate(QDate(2000, 1, 1));
+    orderEndDateEdit = new QDateEdit(orderFilterPanel);
+    orderEndDateEdit->setObjectName(QStringLiteral("orderEndDateEdit"));
+    orderEndDateEdit->setCalendarPopup(true);
+    orderEndDateEdit->setDisplayFormat(QStringLiteral("yyyy-MM-dd"));
+    orderEndDateEdit->setDate(QDate(2099, 12, 31));
+    auto *queryOrderButton = new QPushButton(QStringLiteral("查询"), orderFilterPanel);
+    queryOrderButton->setObjectName(QStringLiteral("queryOrderButton"));
+    queryOrderButton->setIcon(style()->standardIcon(QStyle::SP_FileDialogContentsView));
+    auto *resetOrderButton = new QPushButton(QStringLiteral("重置"), orderFilterPanel);
+    resetOrderButton->setObjectName(QStringLiteral("resetOrderButton"));
+    resetOrderButton->setIcon(style()->standardIcon(QStyle::SP_BrowserReload));
+    refundOrderButton = new QPushButton(QStringLiteral("按订单退票"), orderFilterPanel);
     refundOrderButton->setObjectName(QStringLiteral("refundOrderButton"));
     refundOrderButton->setIcon(style()->standardIcon(QStyle::SP_ArrowBack));
     refundOrderButton->setEnabled(false);
-    orderToolbar->addWidget(orderSearchEdit, 1);
-    orderToolbar->addWidget(refundOrderButton);
+    rescheduleOrderButton = new QPushButton(QStringLiteral("办理改签"), orderFilterPanel);
+    rescheduleOrderButton->setObjectName(QStringLiteral("rescheduleOrderButton"));
+    rescheduleOrderButton->setIcon(style()->standardIcon(QStyle::SP_BrowserReload));
+    rescheduleOrderButton->setEnabled(false);
+
+    orderFilterLayout->addWidget(new QLabel(QStringLiteral("旅客"), orderFilterPanel), 0, 0);
+    orderFilterLayout->addWidget(orderPassengerFilterEdit, 0, 1);
+    orderFilterLayout->addWidget(new QLabel(QStringLiteral("订单状态"), orderFilterPanel), 0, 2);
+    orderFilterLayout->addWidget(orderStatusFilterCombo, 0, 3);
+    orderFilterLayout->addWidget(new QLabel(QStringLiteral("车次号"), orderFilterPanel), 0, 4);
+    orderFilterLayout->addWidget(orderRouteFilterEdit, 0, 5);
+    orderFilterLayout->addWidget(new QLabel(QStringLiteral("下单日期"), orderFilterPanel), 1, 0);
+    orderFilterLayout->addWidget(orderStartDateEdit, 1, 1);
+    orderFilterLayout->addWidget(new QLabel(QStringLiteral("至"), orderFilterPanel), 1, 2);
+    orderFilterLayout->addWidget(orderEndDateEdit, 1, 3);
+    orderFilterLayout->addWidget(queryOrderButton, 1, 4);
+    orderFilterLayout->addWidget(resetOrderButton, 1, 5);
+    orderFilterLayout->addWidget(rescheduleOrderButton, 1, 6);
+    orderFilterLayout->addWidget(refundOrderButton, 1, 7);
 
     orderTable = new QTableWidget(orderPage);
     orderTable->setObjectName(QStringLiteral("orderTable"));
-    orderTable->setColumnCount(12);
+    orderTable->setColumnCount(14);
     orderTable->setHorizontalHeaderLabels(
         {QStringLiteral("订单号"), QStringLiteral("创建时间"),
          QStringLiteral("旅客姓名"), QStringLiteral("证件号"),
          QStringLiteral("手机号"), QStringLiteral("车次号"),
          QStringLiteral("发车日期"), QStringLiteral("席位"),
          QStringLiteral("行程"), QStringLiteral("数量"),
-         QStringLiteral("订单金额"), QStringLiteral("状态")});
+         QStringLiteral("订单金额"), QStringLiteral("状态"),
+         QStringLiteral("单价"), QStringLiteral("操作")});
     orderTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    orderTable->horizontalHeader()->setSectionResizeMode(13, QHeaderView::ResizeToContents);
     orderTable->horizontalHeader()->setMinimumHeight(42);
     orderTable->verticalHeader()->setVisible(false);
     orderTable->setSelectionBehavior(QAbstractItemView::SelectRows);
@@ -628,9 +713,18 @@ Widget::Widget(QWidget *parent)
     orderTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
     orderTable->setAlternatingRowColors(true);
     orderTable->setShowGrid(false);
-    orderPageLayout->addLayout(orderToolbar);
+    orderPageLayout->addWidget(orderFilterPanel);
     orderPageLayout->addWidget(orderTable, 1);
 
+    connect(queryOrderButton, &QPushButton::clicked, this, &Widget::filterOrders);
+    connect(resetOrderButton, &QPushButton::clicked, this, [this] {
+        orderPassengerFilterEdit->clear();
+        orderRouteFilterEdit->clear();
+        orderStatusFilterCombo->setCurrentIndex(0);
+        orderStartDateEdit->setDate(QDate(2000, 1, 1));
+        orderEndDateEdit->setDate(QDate(2099, 12, 31));
+        filterOrders();
+    });
     // ==================== 售票中心 ====================
     auto *ticketPanel = new QFrame(this);
     ticketPanel->setObjectName(QStringLiteral("ticketPanel"));
@@ -795,9 +889,12 @@ Widget::Widget(QWidget *parent)
                     targetRow, column,
                     new QTableWidgetItem(ui->routeTable->item(baseRow, column)->text()));
             }
-            for (int column = SeatType; column < ColumnCount; ++column) {
+            for (int column = SeatType; column <= Remaining; ++column) {
                 ui->routeTable->setItem(targetRow, column, new QTableWidgetItem);
             }
+            ui->routeTable->setItem(
+                targetRow, Status,
+                new QTableWidgetItem(ui->routeTable->item(baseRow, Status)->text()));
         }
         const int capacity = seatCapacityEdit->text().toInt();
         ui->routeTable->item(targetRow, SeatType)->setText(seatTypeEditor->currentText());
@@ -942,6 +1039,13 @@ Widget::Widget(QWidget *parent)
         const int row = ui->routeTable->selectedItems().isEmpty()
                             ? -1 : ui->routeTable->currentRow();
         updateTicketSelection(row);
+        const bool selected = row >= 0 && ui->routeTable->item(row, Status);
+        toggleRouteStatusButton->setEnabled(selected);
+        if (selected) {
+            toggleRouteStatusButton->setText(
+                ui->routeTable->item(row, Status)->text() == QStringLiteral("停用")
+                    ? QStringLiteral("启用班次") : QStringLiteral("停用班次"));
+        }
     });
     connect(sellTicketButton, &QPushButton::clicked,
             this, &Widget::sellTickets);
@@ -965,18 +1069,61 @@ Widget::Widget(QWidget *parent)
         }
     });
 
-    // 订单搜索、选中状态和退票按钮联动，避免未选订单或已退订单被重复处理。
-    connect(orderSearchEdit, &QLineEdit::textChanged,
-            this, &Widget::filterOrders);
+    // 订单选中状态与退票、改签按钮联动，只有已出票订单可以办理。
     connect(orderTable, &QTableWidget::itemSelectionChanged, this, [this] {
         const int row = orderTable->currentRow();
-        const bool refundable = row >= 0 && orderTable->item(row, 11)
-                                && orderTable->item(row, 11)->text()
-                                       == QStringLiteral("已出票");
-        refundOrderButton->setEnabled(refundable);
+        const bool operable = row >= 0 && orderTable->item(row, 11)
+                              && orderTable->item(row, 11)->text()
+                                     == QStringLiteral("已出票");
+        refundOrderButton->setEnabled(operable);
+        rescheduleOrderButton->setEnabled(operable);
     });
     connect(refundOrderButton, &QPushButton::clicked,
             this, &Widget::refundSelectedOrder);
+    connect(rescheduleOrderButton, &QPushButton::clicked,
+            this, &Widget::rescheduleSelectedOrder);
+
+    // 新增站点写入站点字典，并立即刷新两个可搜索下拉框。
+    connect(addStationButton, &QPushButton::clicked, this, [this] {
+        bool accepted = false;
+        const QString station = QInputDialog::getText(
+            this, QStringLiteral("新增站点"), QStringLiteral("站点名称："),
+            QLineEdit::Normal, QString(), &accepted).trimmed();
+        if (!accepted || station.isEmpty()) return;
+        if (stationNames.contains(station, Qt::CaseInsensitive)) {
+            QMessageBox::information(this, QStringLiteral("站点已存在"),
+                                     QStringLiteral("站点字典中已经存在该站点。"));
+            return;
+        }
+        stationNames.append(station);
+        stationNames.sort(Qt::CaseInsensitive);
+        saveStations();
+        loadStations();
+    });
+
+    // 班次逻辑停用：保留历史订单和流水，仅从售票选择器中移除。
+    connect(toggleRouteStatusButton, &QPushButton::clicked, this, [this] {
+        const int selectedRow = ui->routeTable->currentRow();
+        if (selectedRow < 0) return;
+        const QString number = ui->routeTable->item(selectedRow, Number)->text();
+        const QString date = ui->routeTable->item(selectedRow, DepartureDate)->text();
+        const bool disable = ui->routeTable->item(selectedRow, Status)->text()
+                             != QStringLiteral("停用");
+        for (int row = 0; row < ui->routeTable->rowCount(); ++row) {
+            if (ui->routeTable->item(row, Number)->text() == number
+                && ui->routeTable->item(row, DepartureDate)->text() == date) {
+                ui->routeTable->item(row, Status)->setText(
+                    disable ? QStringLiteral("停用") : QStringLiteral("启用"));
+            }
+        }
+        saveRoutes();
+        refreshScheduleRows();
+        refreshTicketRouteChoices();
+        refreshSeatInventoryPage();
+        updateStatistics();
+        toggleRouteStatusButton->setText(
+            disable ? QStringLiteral("启用班次") : QStringLiteral("停用班次"));
+    });
 
 // ==================== 按钮图标与交互提示 ====================
     // 使用 Qt 标准图标，不依赖外部图片，并保留所有现有 objectName。
@@ -999,8 +1146,10 @@ Widget::Widget(QWidget *parent)
     const auto clearInputs = [this, dateEdit, timeEdit, arrivalTimeEdit] {
         ui->routeNumberEdit->clear();
         dateEdit->setDate(QDate::currentDate());
-        ui->departureEdit->clear();
-        ui->destinationEdit->clear();
+        departureStationCombo->setCurrentIndex(-1);
+        destinationStationCombo->setCurrentIndex(-1);
+        departureStationCombo->lineEdit()->clear();
+        destinationStationCombo->lineEdit()->clear();
         timeEdit->clear();
         arrivalTimeEdit->clear();
         ui->routeNumberEdit->setFocus();
@@ -1009,8 +1158,8 @@ Widget::Widget(QWidget *parent)
     const auto readInputs = [this, dateEdit, timeEdit, arrivalTimeEdit] {
         return QStringList{ui->routeNumberEdit->text().trimmed(),
                            dateEdit->date().toString(QStringLiteral("yyyy-MM-dd")),
-                           ui->departureEdit->text().trimmed(),
-                           ui->destinationEdit->text().trimmed(),
+                           departureStationCombo->currentText().trimmed(),
+                           destinationStationCombo->currentText().trimmed(),
                            timeEdit->text().trimmed(),
                            arrivalTimeEdit->text().trimmed()};
     };
@@ -1034,6 +1183,17 @@ Widget::Widget(QWidget *parent)
         if (!QTime::fromString(values.at(ArrivalTime), QStringLiteral("HH:mm")).isValid()) {
             QMessageBox::warning(this, QStringLiteral("时间格式错误"),
                                  QStringLiteral("到达时间请按 HH:mm 输入，例如 12:30。"));
+            return false;
+        }
+        if (!stationNames.contains(values.at(Departure), Qt::CaseInsensitive)
+            || !stationNames.contains(values.at(Destination), Qt::CaseInsensitive)) {
+            QMessageBox::warning(this, QStringLiteral("站点不存在"),
+                                 QStringLiteral("出发地和目的地必须从站点字典中选择。"));
+            return false;
+        }
+        if (values.at(Departure).compare(values.at(Destination), Qt::CaseInsensitive) == 0) {
+            QMessageBox::warning(this, QStringLiteral("站点重复"),
+                                 QStringLiteral("出发地和目的地不能相同。"));
             return false;
         }
         return true;
@@ -1064,7 +1224,7 @@ Widget::Widget(QWidget *parent)
         }
         const QStringList inventoryPlaceholder{
             QStringLiteral("未配置"), QStringLiteral("¥0.00"),
-            QStringLiteral("0"), QStringLiteral("0")};
+            QStringLiteral("0"), QStringLiteral("0"), QStringLiteral("启用")};
         for (int offset = 0; offset < inventoryPlaceholder.size(); ++offset) {
             ui->routeTable->setItem(
                 row, SeatType + offset,
@@ -1091,8 +1251,8 @@ Widget::Widget(QWidget *parent)
         dateEdit->setDate(QDate::fromString(
             ui->routeTable->item(row, DepartureDate)->text(),
             QStringLiteral("yyyy-MM-dd")));
-        ui->departureEdit->setText(ui->routeTable->item(row, Departure)->text());
-        ui->destinationEdit->setText(ui->routeTable->item(row, Destination)->text());
+        departureStationCombo->setCurrentText(ui->routeTable->item(row, Departure)->text());
+        destinationStationCombo->setCurrentText(ui->routeTable->item(row, Destination)->text());
         timeEdit->setText(ui->routeTable->item(row, DepartureTime)->text());
         arrivalTimeEdit->setText(ui->routeTable->item(row, ArrivalTime)->text());
         ui->saveEditButton->setEnabled(true);
@@ -1243,6 +1403,7 @@ void Widget::refreshTicketRouteChoices()
     ticketRouteCombo->clear();
     QSet<QString> addedKeys;
     for (int row = 0; row < ui->routeTable->rowCount(); ++row) {
+        if (ui->routeTable->item(row, Status)->text() == QStringLiteral("停用")) continue;
         const QString key = ui->routeTable->item(row, Number)->text().toUpper()
                             + QChar('|')
                             + ui->routeTable->item(row, DepartureDate)->text();
@@ -1277,6 +1438,7 @@ void Widget::refreshTicketSeatChoices()
                             + QChar('|')
                             + ui->routeTable->item(row, DepartureDate)->text();
         if (key != serviceKey
+            || ui->routeTable->item(row, Status)->text() == QStringLiteral("停用")
             || ui->routeTable->item(row, SeatType)->text() == QStringLiteral("未配置")) {
             continue;
         }
@@ -1401,6 +1563,7 @@ void Widget::updateTicketSelection(int row)
         ticketSeatCombo->setCurrentIndex(ticketSeatCombo->findData(row));
     }
 
+    const bool enabled = ui->routeTable->item(row, Status)->text() != QStringLiteral("停用");
     const int remaining = ui->routeTable->item(row, Remaining)->text().toInt();
     const int sold = ui->routeTable->item(row, Number)->data(SoldRole).toInt();
     selectedRouteLabel->setText(
@@ -1415,7 +1578,7 @@ void Widget::updateTicketSelection(int row)
                  ui->routeTable->item(row, Price)->text())
             .arg(remaining)
             .arg(sold));
-    sellTicketButton->setEnabled(remaining > 0);
+    sellTicketButton->setEnabled(enabled && remaining > 0);
     refundTicketButton->setEnabled(sold > 0);
 }
 
@@ -1438,11 +1601,14 @@ void Widget::updateStatistics()
         }
         auto *remainingItem = ui->routeTable->item(row, Remaining);
         const int remaining = remainingItem->text().toInt();
-        remainingTotal += remaining;
-
         const auto *numberItem = ui->routeTable->item(row, Number);
         soldTotal += numberItem->data(SoldRole).toInt();
         revenueTotal += numberItem->data(RevenueRole).toDouble();
+        if (ui->routeTable->item(row, Status)->text() == QStringLiteral("停用")) {
+            remainingItem->setForeground(QColor(QStringLiteral("#64748b")));
+            continue;
+        }
+        remainingTotal += remaining;
 
         // 余票 0 标记为售罄，1～5 标记为库存紧张；文字提示避免只靠颜色表达。
         QFont stockFont = remainingItem->font();
@@ -1669,24 +1835,21 @@ void Widget::refundTickets()
             .arg(quantity).arg(amount, 0, 'f', 2));
 }
 
-// ==================== V0.11 实名订单管理 ====================
+// ==================== V0.12 订单组合筛选与改签 ====================
 // 售票成功后生成订单行；证件号和手机号仅显示脱敏内容，降低隐私泄露风险。
 void Widget::createOrder(int routeRow, int quantity, double amount,
                          const QString &orderNumber)
 {
     const QString idNumber = passengerIdEdit->text().trimmed().toUpper();
     const QString phone = passengerPhoneEdit->text().trimmed();
-    const QString maskedId = idNumber.left(6)
-                             + QStringLiteral("********")
-                             + idNumber.right(4);
-    const QString maskedPhone = phone.left(3)
-                                + QStringLiteral("****")
-                                + phone.right(4);
+    const QString maskedId = idNumber.left(6) + QStringLiteral("********") + idNumber.right(4);
+    const QString maskedPhone = phone.left(3) + QStringLiteral("****") + phone.right(4);
     const QString journey = QStringLiteral("%1 → %2　%3-%4")
         .arg(ui->routeTable->item(routeRow, Departure)->text(),
              ui->routeTable->item(routeRow, Destination)->text(),
              ui->routeTable->item(routeRow, DepartureTime)->text(),
              ui->routeTable->item(routeRow, ArrivalTime)->text());
+    const double unitPrice = quantity > 0 ? amount / quantity : 0.0;
     const QStringList values{
         orderNumber,
         QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")),
@@ -1694,9 +1857,8 @@ void Widget::createOrder(int routeRow, int quantity, double amount,
         ui->routeTable->item(routeRow, Number)->text(),
         ui->routeTable->item(routeRow, DepartureDate)->text(),
         ui->routeTable->item(routeRow, SeatType)->text(), journey,
-        QString::number(quantity),
-        QStringLiteral("¥%1").arg(amount, 0, 'f', 2),
-        QStringLiteral("已出票")};
+        QString::number(quantity), QStringLiteral("¥%1").arg(amount, 0, 'f', 2),
+        QStringLiteral("已出票"), QStringLiteral("¥%1").arg(unitPrice, 0, 'f', 2)};
 
     orderTable->insertRow(0);
     for (int column = 0; column < values.size(); ++column) {
@@ -1705,19 +1867,35 @@ void Widget::createOrder(int routeRow, int quantity, double amount,
         orderTable->setItem(0, column, item);
     }
     orderTable->item(0, 11)->setForeground(QColor(QStringLiteral("#15803d")));
+    installOrderActionButton(0);
     saveOrders();
     filterOrders();
 }
 
-// 将实名订单保存到独立数组，避免影响 V0.10 以前的班次和流水数据。
+// 操作列中的改签按钮可直接定位订单，减少先选中再去工具栏操作的步骤。
+void Widget::installOrderActionButton(int row)
+{
+    auto *button = new QPushButton(QStringLiteral("改签"), orderTable);
+    button->setObjectName(QStringLiteral("orderRescheduleAction"));
+    button->setEnabled(orderTable->item(row, 11)
+                       && orderTable->item(row, 11)->text() == QStringLiteral("已出票"));
+    orderTable->setCellWidget(row, 13, button);
+    connect(button, &QPushButton::clicked, this, [this, button] {
+        const int row = orderTable->indexAt(button->pos()).row();
+        if (row < 0) return;
+        orderTable->selectRow(row);
+        rescheduleSelectedOrder();
+    });
+}
+
+// 将订单的数据列保存到独立数组；第 13 列单价为 V0.12 新增，操作按钮不入库。
 void Widget::saveOrders() const
 {
-    QSettings settings(QStringLiteral("StudentQtProjects"),
-                       QStringLiteral("BusTicketSystem"));
+    QSettings settings(QStringLiteral("StudentQtProjects"), QStringLiteral("BusTicketSystem"));
     settings.beginWriteArray(QStringLiteral("orders"));
     for (int row = 0; row < orderTable->rowCount(); ++row) {
         settings.setArrayIndex(row);
-        for (int column = 0; column < orderTable->columnCount(); ++column) {
+        for (int column = 0; column <= 12; ++column) {
             const auto *item = orderTable->item(row, column);
             settings.setValue(QStringLiteral("column%1").arg(column),
                               item ? item->text() : QString());
@@ -1726,65 +1904,211 @@ void Widget::saveOrders() const
     settings.endArray();
 }
 
-// 启动时恢复 V0.11 订单；旧版本没有 orders 数组时自然显示为空。
+// 启动时恢复订单，并为 V0.11 订单自动推导单价，保证升级后仍可退票和改签。
 void Widget::loadOrders()
 {
-    QSettings settings(QStringLiteral("StudentQtProjects"),
-                       QStringLiteral("BusTicketSystem"));
+    QSettings settings(QStringLiteral("StudentQtProjects"), QStringLiteral("BusTicketSystem"));
     const int count = settings.beginReadArray(QStringLiteral("orders"));
     for (int row = 0; row < count; ++row) {
         settings.setArrayIndex(row);
         orderTable->insertRow(row);
-        // 兼容本次升级前的十列订单：旧订单缺少日期和席位，状态仍正确迁移。
-        const bool legacyOrder =
-            !settings.contains(QStringLiteral("column10"));
-        for (int column = 0; column < orderTable->columnCount(); ++column) {
+        const bool legacyOrder = !settings.contains(QStringLiteral("column10"));
+        for (int column = 0; column <= 12; ++column) {
             QString value;
             if (legacyOrder) {
-                if (column <= 5) {
-                    value = settings.value(
-                        QStringLiteral("column%1").arg(column)).toString();
-                } else if (column == 6) {
-                    value = QStringLiteral("历史日期");
-                } else if (column == 7) {
-                    value = QStringLiteral("标准座");
-                } else {
-                    value = settings.value(
-                        QStringLiteral("column%1").arg(column - 2)).toString();
-                }
+                if (column <= 5) value = settings.value(QStringLiteral("column%1").arg(column)).toString();
+                else if (column == 6) value = QStringLiteral("历史日期");
+                else if (column == 7) value = QStringLiteral("标准座");
+                else if (column <= 11) value = settings.value(QStringLiteral("column%1").arg(column - 2)).toString();
             } else {
-                value = settings.value(
-                    QStringLiteral("column%1").arg(column)).toString();
+                value = settings.value(QStringLiteral("column%1").arg(column)).toString();
+            }
+            if (column == 12 && value.isEmpty()) {
+                const int quantity = qMax(1, orderTable->item(row, 9)->text().toInt());
+                const double amount = orderTable->item(row, 10)->text().remove(QChar(0x00A5)).toDouble();
+                value = QStringLiteral("¥%1").arg(amount / quantity, 0, 'f', 2);
             }
             auto *item = new QTableWidgetItem(value);
             item->setTextAlignment(Qt::AlignCenter);
             orderTable->setItem(row, column, item);
         }
-        if (orderTable->item(row, 11)) {
-            const bool issued = orderTable->item(row, 11)->text()
-                                == QStringLiteral("已出票");
-            orderTable->item(row, 11)->setForeground(
-                QColor(issued ? QStringLiteral("#15803d")
-                              : QStringLiteral("#b45309")));
-        }
+        const bool issued = orderTable->item(row, 11)->text() == QStringLiteral("已出票");
+        orderTable->item(row, 11)->setForeground(
+            QColor(issued ? QStringLiteral("#15803d") : QStringLiteral("#b45309")));
+        installOrderActionButton(row);
     }
     settings.endArray();
 }
 
-// 订单搜索支持订单号、旅客、脱敏证件、手机号、班次、行程和状态等任意列。
+// 多条件组合筛选：各条件之间使用 AND，同一旅客字段支持姓名或手机号模糊匹配。
 void Widget::filterOrders()
 {
-    const QString keyword = orderSearchEdit->text().trimmed();
-    for (int row = 0; row < orderTable->rowCount(); ++row) {
-        bool matched = keyword.isEmpty();
-        for (int column = 0;
-             !matched && column < orderTable->columnCount(); ++column) {
-            const auto *item = orderTable->item(row, column);
-            matched = item
-                      && item->text().contains(keyword, Qt::CaseInsensitive);
-        }
-        orderTable->setRowHidden(row, !matched);
+    const QString passenger = orderPassengerFilterEdit->text().trimmed();
+    const QString route = orderRouteFilterEdit->text().trimmed();
+    const QString status = orderStatusFilterCombo->currentText();
+    const QDate startDate = orderStartDateEdit->date();
+    const QDate endDate = orderEndDateEdit->date();
+    if (startDate > endDate) {
+        QMessageBox::warning(this, QStringLiteral("日期范围错误"),
+                             QStringLiteral("开始日期不能晚于结束日期。"));
+        return;
     }
+    for (int row = 0; row < orderTable->rowCount(); ++row) {
+        const bool passengerMatched = passenger.isEmpty()
+            || orderTable->item(row, 2)->text().contains(passenger, Qt::CaseInsensitive)
+            || orderTable->item(row, 4)->text().contains(passenger, Qt::CaseInsensitive);
+        const bool routeMatched = route.isEmpty()
+            || orderTable->item(row, 5)->text().contains(route, Qt::CaseInsensitive);
+        const bool statusMatched = status == QStringLiteral("全部状态")
+            || orderTable->item(row, 11)->text() == status;
+        const QDate orderDate = QDate::fromString(
+            orderTable->item(row, 1)->text().left(10), QStringLiteral("yyyy-MM-dd"));
+        const bool dateMatched = orderDate.isValid()
+            && orderDate >= startDate && orderDate <= endDate;
+        orderTable->setRowHidden(row,
+            !(passengerMatched && routeMatched && statusMatched && dateMatched));
+    }
+}
+
+// 按订单改签：选择启用班次和席位，自动换库存并记录多退少补差额。
+void Widget::rescheduleSelectedOrder()
+{
+    const int orderRow = orderTable->currentRow();
+    if (orderRow < 0 || !orderTable->item(orderRow, 11)
+        || orderTable->item(orderRow, 11)->text() != QStringLiteral("已出票")) {
+        QMessageBox::information(this, QStringLiteral("订单不可改签"),
+                                 QStringLiteral("请选择一笔状态为“已出票”的订单。"));
+        return;
+    }
+
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("办理订单改签"));
+    dialog.setModal(true);
+    dialog.setMinimumWidth(620);
+    auto *layout = new QVBoxLayout(&dialog);
+    auto *form = new QFormLayout;
+    auto *routeCombo = new QComboBox(&dialog);
+    auto *seatCombo = new QComboBox(&dialog);
+    auto *differenceLabel = new QLabel(&dialog);
+    differenceLabel->setObjectName(QStringLiteral("rescheduleDifferenceLabel"));
+    differenceLabel->setWordWrap(true);
+    QSet<QString> routeKeys;
+    for (int row = 0; row < ui->routeTable->rowCount(); ++row) {
+        if (ui->routeTable->item(row, Status)->text() == QStringLiteral("停用")) continue;
+        const QString key = ui->routeTable->item(row, Number)->text().toUpper()
+                            + QChar('|') + ui->routeTable->item(row, DepartureDate)->text();
+        if (routeKeys.contains(key)) continue;
+        routeKeys.insert(key);
+        routeCombo->addItem(QStringLiteral("%1　%2　%3 → %4　%5-%6")
+            .arg(ui->routeTable->item(row, Number)->text(),
+                 ui->routeTable->item(row, DepartureDate)->text(),
+                 ui->routeTable->item(row, Departure)->text(),
+                 ui->routeTable->item(row, Destination)->text(),
+                 ui->routeTable->item(row, DepartureTime)->text(),
+                 ui->routeTable->item(row, ArrivalTime)->text()), key);
+    }
+    form->addRow(QStringLiteral("新班次"), routeCombo);
+    form->addRow(QStringLiteral("新席位"), seatCombo);
+    layout->addLayout(form);
+    layout->addWidget(differenceLabel);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("确认改签"));
+    buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
+    layout->addWidget(buttons);
+
+    const int quantity = orderTable->item(orderRow, 9)->text().toInt();
+    const double oldAmount = orderTable->item(orderRow, 10)->text().remove(QChar(0x00A5)).toDouble();
+    const auto refreshSeats = [this, routeCombo, seatCombo] {
+        seatCombo->clear();
+        const QString key = routeCombo->currentData().toString();
+        for (int row = 0; row < ui->routeTable->rowCount(); ++row) {
+            const QString rowKey = ui->routeTable->item(row, Number)->text().toUpper()
+                                   + QChar('|') + ui->routeTable->item(row, DepartureDate)->text();
+            if (rowKey == key && ui->routeTable->item(row, Status)->text() != QStringLiteral("停用")
+                && ui->routeTable->item(row, SeatType)->text() != QStringLiteral("未配置")) {
+                seatCombo->addItem(QStringLiteral("%1　%2　余票 %3")
+                    .arg(ui->routeTable->item(row, SeatType)->text(),
+                         ui->routeTable->item(row, Price)->text(),
+                         ui->routeTable->item(row, Remaining)->text()), row);
+            }
+        }
+    };
+    const auto refreshDifference = [this, seatCombo, differenceLabel, quantity, oldAmount] {
+        const int row = seatCombo->currentData().toInt();
+        if (seatCombo->currentIndex() < 0 || row < 0) {
+            differenceLabel->setText(QStringLiteral("所选班次暂无可改签席位。"));
+            return;
+        }
+        const double price = ui->routeTable->item(row, Price)->text().remove(QChar(0x00A5)).toDouble();
+        const double difference = price * quantity - oldAmount;
+        differenceLabel->setText(QStringLiteral("新订单金额：¥%1　差额：%2¥%3（%4）")
+            .arg(price * quantity, 0, 'f', 2)
+            .arg(difference >= 0 ? QStringLiteral("补收 ") : QStringLiteral("退还 "))
+            .arg(qAbs(difference), 0, 'f', 2)
+            .arg(difference >= 0 ? QStringLiteral("多补") : QStringLiteral("少退")));
+    };
+    connect(routeCombo, &QComboBox::currentIndexChanged, &dialog,
+            [refreshSeats, refreshDifference] { refreshSeats(); refreshDifference(); });
+    connect(seatCombo, &QComboBox::currentIndexChanged, &dialog,
+            [refreshDifference] { refreshDifference(); });
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    refreshSeats();
+    refreshDifference();
+    if (dialog.exec() != QDialog::Accepted || seatCombo->currentIndex() < 0) return;
+
+    const int targetRow = seatCombo->currentData().toInt();
+    const int sourceRow = findRouteRow(orderTable->item(orderRow, 5)->text(),
+                                       orderTable->item(orderRow, 6)->text(),
+                                       orderTable->item(orderRow, 7)->text());
+    if (sourceRow < 0 || targetRow == sourceRow) {
+        QMessageBox::information(this, QStringLiteral("无需改签"),
+                                 sourceRow < 0 ? QStringLiteral("原订单班次已不存在，无法自动换回库存。")
+                                               : QStringLiteral("新班次和席位与原订单相同。"));
+        return;
+    }
+    if (ui->routeTable->item(targetRow, Remaining)->text().toInt() < quantity) {
+        QMessageBox::warning(this, QStringLiteral("余票不足"),
+                             QStringLiteral("目标席位余票不足，无法完成整单改签。"));
+        return;
+    }
+
+    const double newPrice = ui->routeTable->item(targetRow, Price)->text().remove(QChar(0x00A5)).toDouble();
+    const double newAmount = newPrice * quantity;
+    const double difference = newAmount - oldAmount;
+    auto *sourceNumber = ui->routeTable->item(sourceRow, Number);
+    auto *targetNumber = ui->routeTable->item(targetRow, Number);
+    ui->routeTable->item(sourceRow, Remaining)->setText(QString::number(
+        ui->routeTable->item(sourceRow, Remaining)->text().toInt() + quantity));
+    sourceNumber->setData(SoldRole, qMax(0, sourceNumber->data(SoldRole).toInt() - quantity));
+    sourceNumber->setData(RevenueRole, qMax(0.0, sourceNumber->data(RevenueRole).toDouble() - oldAmount));
+    ui->routeTable->item(targetRow, Remaining)->setText(QString::number(
+        ui->routeTable->item(targetRow, Remaining)->text().toInt() - quantity));
+    targetNumber->setData(SoldRole, targetNumber->data(SoldRole).toInt() + quantity);
+    targetNumber->setData(RevenueRole, targetNumber->data(RevenueRole).toDouble() + newAmount);
+
+    orderTable->item(orderRow, 5)->setText(ui->routeTable->item(targetRow, Number)->text());
+    orderTable->item(orderRow, 6)->setText(ui->routeTable->item(targetRow, DepartureDate)->text());
+    orderTable->item(orderRow, 7)->setText(ui->routeTable->item(targetRow, SeatType)->text());
+    orderTable->item(orderRow, 8)->setText(QStringLiteral("%1 → %2　%3-%4")
+        .arg(ui->routeTable->item(targetRow, Departure)->text(),
+             ui->routeTable->item(targetRow, Destination)->text(),
+             ui->routeTable->item(targetRow, DepartureTime)->text(),
+             ui->routeTable->item(targetRow, ArrivalTime)->text()));
+    orderTable->item(orderRow, 10)->setText(QStringLiteral("¥%1").arg(newAmount, 0, 'f', 2));
+    orderTable->item(orderRow, 12)->setText(QStringLiteral("¥%1").arg(newPrice, 0, 'f', 2));
+    recordTransaction(difference >= 0 ? QStringLiteral("改签补款") : QStringLiteral("改签退款"),
+                      targetRow, quantity, newPrice, difference,
+                      ui->routeTable->item(targetRow, Remaining)->text().toInt());
+    saveRoutes();
+    saveOrders();
+    updateStatistics();
+    refreshSeatInventoryPage();
+    refreshTicketRouteChoices();
+    QMessageBox::information(this, QStringLiteral("改签成功"),
+        QStringLiteral("订单已改签完成，%1 ¥%2。")
+            .arg(difference >= 0 ? QStringLiteral("需补收") : QStringLiteral("应退还"))
+            .arg(qAbs(difference), 0, 'f', 2));
 }
 
 // 根据订单保存的班次号定位当前班次，供订单退票恢复库存和经营统计。
@@ -1853,6 +2177,10 @@ void Widget::refundSelectedOrder()
     orderTable->item(orderRow, 11)->setForeground(
         QColor(QStringLiteral("#b45309")));
     refundOrderButton->setEnabled(false);
+    rescheduleOrderButton->setEnabled(false);
+    if (auto *button = qobject_cast<QPushButton *>(orderTable->cellWidget(orderRow, 13))) {
+        button->setEnabled(false);
+    }
     recordTransaction(QStringLiteral("订单退票"), routeRow, -quantity,
                       unitPrice, -amount, remainingItem->text().toInt());
     saveRoutes();
@@ -2026,6 +2354,41 @@ void Widget::exportTransactions()
         QStringLiteral("交易流水已保存到：\n%1").arg(path));
 }
 
+// ==================== V0.12 站点字典 ====================
+// 站点字典继续使用 QSettings 保存，和现有数据架构保持一致。
+void Widget::loadStations()
+{
+    QSettings settings(QStringLiteral("StudentQtProjects"), QStringLiteral("BusTicketSystem"));
+    stationNames = settings.value(QStringLiteral("stations")).toStringList();
+    if (stationNames.isEmpty()) {
+        stationNames = {QStringLiteral("北京"), QStringLiteral("上海"), QStringLiteral("广州"),
+                        QStringLiteral("深圳"), QStringLiteral("南京"), QStringLiteral("杭州"),
+                        QStringLiteral("苏州"), QStringLiteral("天津"), QStringLiteral("重庆"),
+                        QStringLiteral("成都"), QStringLiteral("武汉"), QStringLiteral("西安"),
+                        QStringLiteral("郑州"), QStringLiteral("长沙"), QStringLiteral("太原"),
+                        QStringLiteral("大同"), QStringLiteral("福州"), QStringLiteral("厦门")};
+        saveStations();
+    }
+    stationNames.sort(Qt::CaseInsensitive);
+    for (QComboBox *combo : {departureStationCombo, destinationStationCombo}) {
+        if (!combo) continue;
+        const QString previous = combo->currentText();
+        const QSignalBlocker blocker(combo);
+        combo->clear();
+        combo->addItems(stationNames);
+        combo->setCurrentText(previous);
+        combo->completer()->setCaseSensitivity(Qt::CaseInsensitive);
+        combo->completer()->setFilterMode(Qt::MatchContains);
+        combo->completer()->setCompletionMode(QCompleter::PopupCompletion);
+    }
+}
+
+void Widget::saveStations() const
+{
+    QSettings settings(QStringLiteral("StudentQtProjects"), QStringLiteral("BusTicketSystem"));
+    settings.setValue(QStringLiteral("stations"), stationNames);
+}
+
 // ==================== 自动保存数据 ====================
 // 把表格所有行写入 QSettings；添加、修改、删除后都会调用这里。
 void Widget::saveRoutes() const
@@ -2055,6 +2418,8 @@ void Widget::saveRoutes() const
                           ui->routeTable->item(row, TotalSeats)->text());
         settings.setValue(QStringLiteral("remaining"),
                           ui->routeTable->item(row, Remaining)->text());
+        settings.setValue(QStringLiteral("status"),
+                          ui->routeTable->item(row, Status)->text());
         // V0.8 新增：保存每个班次的累计销量和累计营业额。
         const auto *numberItem = ui->routeTable->item(row, Number);
         settings.setValue(QStringLiteral("sold"),
@@ -2094,7 +2459,8 @@ void Widget::loadRoutes()
                 QStringLiteral("totalSeats"),
                 settings.value(QStringLiteral("remaining"), 0).toInt()
                     + settings.value(QStringLiteral("sold"), 0).toInt()).toString(),
-            settings.value(QStringLiteral("remaining"), 0).toString()};
+            settings.value(QStringLiteral("remaining"), 0).toString(),
+            settings.value(QStringLiteral("status"), QStringLiteral("启用")).toString()};
         for (int column = 0; column < ColumnCount; ++column) {
             ui->routeTable->setItem(row, column,
                                     new QTableWidgetItem(values.at(column)));
