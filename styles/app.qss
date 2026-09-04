@@ -621,3 +621,117 @@ QTableWidget#orderTable {
     selection-color: #123c69;
     selection-background-color: #d8eafb;
 }
+
+
+/* ==================== V0.13 可视化座位图：现代客舱、状态图例与大点击目标 ==================== */
+QDialog#seatMapDialog {
+    background-color: #eef4fa;
+}
+QLabel#seatMapTitle {
+    color: #123f70;
+    font-size: 22px;
+    font-weight: 700;
+}
+QLabel#seatMapHint {
+    color: #49657d;
+    font-size: 15px;
+}
+QLabel#seatMapLegend {
+    color: #526b80;
+    padding: 10px 14px;
+    background-color: #ffffff;
+    border: 1px solid #c9d9e7;
+    border-radius: 8px;
+}
+QScrollArea#seatMapScroll {
+    background: transparent;
+    border: none;
+}
+QFrame#seatCabin {
+    background-color: #ffffff;
+    border: 2px solid #b8cee1;
+    border-radius: 22px;
+}
+QLabel#seatColumnLabel {
+    color: #48657f;
+    font-size: 14px;
+    font-weight: 700;
+}
+QLabel#seatAisleLabel {
+    color: #91a5b7;
+    padding: 8px;
+    border-left: 1px dashed #c7d6e3;
+    border-right: 1px dashed #c7d6e3;
+}
+QPushButton#seatButton {
+    min-width: 72px;
+    min-height: 46px;
+    color: #17476f;
+    background-color: #edf7ff;
+    border: 2px solid #89b9df;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 700;
+}
+QPushButton#seatButton:hover {
+    background-color: #d9efff;
+    border-color: #2878b8;
+}
+QPushButton#seatButton[seatState="selected"] {
+    color: #ffffff;
+    background-color: #1769aa;
+    border-color: #0e4f87;
+}
+QPushButton#seatButton[seatState="occupied"] {
+    color: #8b99a5;
+    background-color: #e2e8ee;
+    border-color: #c4cdd5;
+}
+QLabel#seatSelectionSummary {
+    color: #123f70;
+    padding: 12px 14px;
+    background-color: #dcecff;
+    border: 1px solid #aac9e5;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 700;
+}
+
+
+/* ==================== 订单行展开详情：紧凑主表与敏感信息详情层 ==================== */
+QWidget#orderCellHost {
+    background: transparent;
+    border: none;
+}
+QPushButton#orderExpandButton,
+QPushButton#orderRescheduleAction {
+    min-width: 34px;
+    max-width: 42px;
+    min-height: 32px;
+    max-height: 32px;
+    padding: 0;
+    color: #17476f;
+    background-color: #edf5fc;
+    border: 1px solid #b8cee1;
+    border-radius: 7px;
+    font-size: 18px;
+    font-weight: 700;
+}
+QPushButton#orderExpandButton:hover,
+QPushButton#orderRescheduleAction:hover {
+    color: #ffffff;
+    background-color: #1f67ad;
+    border-color: #15558f;
+}
+QFrame#orderDetailPanel {
+    background-color: #eef6fd;
+    border-top: 1px solid #c3d7e8;
+    border-bottom: 1px solid #c3d7e8;
+}
+QFrame#orderDetailPanel QLabel {
+    min-width: 180px;
+    color: #274a68;
+    background: transparent;
+    font-size: 14px;
+    line-height: 1.5;
+}

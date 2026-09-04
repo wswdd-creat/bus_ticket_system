@@ -31,19 +31,21 @@ private:
     void saveRoutes() const;
     void loadStations();
     void saveStations() const;
+    bool saveBusinessState() const;
 
     // 售票中心、席位库存和经营统计。
     void updateTicketSelection(int row);
+    void sortRoutesChronologically();
     void refreshTicketRouteChoices();
     void refreshTicketSeatChoices();
     void refreshSeatInventoryPage();
     void refreshScheduleRows();
     void updateStatistics();
     void sellTickets();
-    void refundTickets();
 
     // 实名订单：组合筛选、退票和改签。
     bool validatePassenger();
+    QStringList chooseSeats(int routeRow, int quantity, int excludedOrderRow = -1);
     void createOrder(int routeRow, int quantity, double amount,
                      const QString &orderNumber);
     void saveOrders() const;
@@ -74,6 +76,7 @@ private:
     QComboBox *departureStationCombo = nullptr;
     QComboBox *destinationStationCombo = nullptr;
     QStringList stationNames;
+    QStringList selectedSeatNumbers;
     QLabel *routeCountLabel = nullptr;
     QLabel *remainingTotalLabel = nullptr;
     QLabel *soldTotalLabel = nullptr;
@@ -83,7 +86,6 @@ private:
     QProgressBar *occupancyProgress = nullptr;
     QSpinBox *ticketQuantitySpin = nullptr;
     QPushButton *sellTicketButton = nullptr;
-    QPushButton *refundTicketButton = nullptr;
     QPushButton *toggleRouteStatusButton = nullptr;
     QTableWidget *seatInventoryTable = nullptr;
     QComboBox *seatTypeEditor = nullptr;
