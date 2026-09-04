@@ -9,6 +9,7 @@ namespace Ui {
 QT_END_NAMESPACE
 
 class QLabel;
+class QComboBox;
 class QLineEdit;
 class QPushButton;
 class QProgressBar;
@@ -31,9 +32,24 @@ private:
 
     // 售票中心：刷新选中班次、运营指标，并处理售票和退票。
     void updateTicketSelection(int row);
+    void refreshTicketRouteChoices();
+    void refreshTicketSeatChoices();
+    void refreshSeatInventoryPage();
+    void refreshScheduleRows();
     void updateStatistics();
     void sellTickets();
     void refundTickets();
+
+    // V0.11 实名订单：校验旅客资料、创建订单并支持按订单安全退票。
+    bool validatePassenger();
+    void createOrder(int routeRow, int quantity, double amount,
+                     const QString &orderNumber);
+    void saveOrders() const;
+    void loadOrders();
+    void filterOrders();
+    void refundSelectedOrder();
+    int findRouteRow(const QString &routeNumber, const QString &departureDate,
+                     const QString &seatType) const;
 
     // V0.9 交易流水：记录、保存、读取、筛选与导出每次交易。
     void recordTransaction(const QString &type, int routeRow,
@@ -48,6 +64,9 @@ private:
     int editingRow = -1;
 
     QLabel *selectedRouteLabel = nullptr;
+    QComboBox *ticketRouteCombo = nullptr;
+    QComboBox *ticketSeatCombo = nullptr;
+    QComboBox *seatServiceCombo = nullptr;
     QLabel *routeCountLabel = nullptr;
     QLabel *remainingTotalLabel = nullptr;
     QLabel *soldTotalLabel = nullptr;
@@ -58,8 +77,18 @@ private:
     QSpinBox *ticketQuantitySpin = nullptr;
     QPushButton *sellTicketButton = nullptr;
     QPushButton *refundTicketButton = nullptr;
+    QTableWidget *seatInventoryTable = nullptr;
+    QComboBox *seatTypeEditor = nullptr;
+    QLineEdit *seatPriceEdit = nullptr;
+    QLineEdit *seatCapacityEdit = nullptr;
+    QLineEdit *passengerNameEdit = nullptr;
+    QLineEdit *passengerIdEdit = nullptr;
+    QLineEdit *passengerPhoneEdit = nullptr;
 
     QTabWidget *contentTabs = nullptr;
     QTableWidget *transactionTable = nullptr;
     QLineEdit *transactionSearchEdit = nullptr;
+    QTableWidget *orderTable = nullptr;
+    QLineEdit *orderSearchEdit = nullptr;
+    QPushButton *refundOrderButton = nullptr;
 };

@@ -458,6 +458,166 @@ QFrame#routeInputPanel {
 QFrame#routeManagementPanel QLineEdit {
     min-height: 40px;
 }
+/* V0.11 日期和席位选择器与班次录入框保持相同高度和焦点层级。 */
+QFrame#routeManagementPanel QDateEdit,
+QFrame#routeManagementPanel QComboBox {
+    min-height: 40px;
+    padding: 0 10px;
+    color: #243b53;
+    background-color: #ffffff;
+    border: 1px solid #b7c9da;
+    border-radius: 7px;
+}
+QFrame#routeManagementPanel QDateEdit:focus,
+QFrame#routeManagementPanel QComboBox:focus {
+    border: 2px solid #1f67ad;
+}
 QFrame#routeManagementPanel QPushButton {
     min-height: 40px;
+}
+/* ==================== V0.10 售票班次选择器：在售票页直接搜索并选择办理班次 ==================== */
+QFrame#ticketRouteSelector {
+    background-color: #edf5fc;
+    border: 1px solid #bfd5e8;
+    border-radius: 10px;
+}
+QLabel#ticketRouteSelectorLabel {
+    color: #173f6b;
+    background: transparent;
+    font-size: 16px;
+    font-weight: 700;
+}
+QComboBox#ticketRouteCombo {
+    min-height: 44px;
+    padding: 0 12px;
+    color: #173b57;
+    background-color: #ffffff;
+    border: 1px solid #9eb9d1;
+    border-radius: 8px;
+}
+/* 售票中心第二级席位选择器与班次选择器保持统一交互反馈。 */
+QComboBox#ticketSeatCombo {
+    min-height: 44px;
+    padding: 0 12px;
+    color: #173b57;
+    background-color: #ffffff;
+    border: 1px solid #9eb9d1;
+    border-radius: 8px;
+}
+QComboBox#ticketSeatCombo:focus {
+    border: 2px solid #1f67ad;
+}
+
+/* ==================== V0.11 席位库存页：班次筛选与库存编辑形成独立工作区 ==================== */
+QFrame#seatEditorPanel {
+    background-color: #f2f7fc;
+    border: 1px solid #c3d5e5;
+    border-radius: 10px;
+}
+QFrame#seatEditorPanel QComboBox,
+QFrame#seatEditorPanel QLineEdit {
+    min-height: 42px;
+    padding: 0 11px;
+    color: #243b53;
+    background-color: #ffffff;
+    border: 1px solid #b7c9da;
+    border-radius: 8px;
+}
+QPushButton#addSeatButton,
+QPushButton#saveSeatButton,
+QPushButton#deleteSeatButton {
+    min-height: 42px;
+    padding: 0 18px;
+}
+QPushButton#deleteSeatButton {
+    color: #9f2d20;
+    background-color: #fff4f2;
+    border-color: #e5aaa3;
+}
+QTableWidget#seatInventoryTable {
+    background-color: #ffffff;
+    alternate-background-color: #f3f7fb;
+    border: 1px solid #c7d5e4;
+    border-radius: 8px;
+    selection-color: #123c69;
+    selection-background-color: #d8eafb;
+}
+QComboBox#ticketRouteCombo:hover {
+    border-color: #4f82b4;
+}
+QComboBox#ticketRouteCombo:focus {
+    border: 2px solid #1f67ad;
+}
+QComboBox#ticketRouteCombo::drop-down {
+    width: 34px;
+    border: none;
+    border-left: 1px solid #c4d3e0;
+}
+QComboBox#ticketRouteCombo QAbstractItemView {
+    color: #23384d;
+    background-color: #ffffff;
+    border: 1px solid #9eb9d1;
+    selection-color: #ffffff;
+    selection-background-color: #1f67ad;
+    outline: none;
+}
+
+/* ==================== V0.11 实名信息卡：突出售票前必须核对的旅客资料 ==================== */
+QFrame#passengerPanel {
+    background-color: #f8fbff;
+    border: 1px solid #bfd5e8;
+    border-left: 4px solid #1f67ad;
+    border-radius: 10px;
+}
+QLabel#passengerHint {
+    color: #60778e;
+    background: transparent;
+    font-size: 13px;
+}
+QFrame#passengerPanel QLineEdit {
+    min-height: 42px;
+    padding: 0 12px;
+    background-color: #ffffff;
+    border: 1px solid #b6c9da;
+    border-radius: 8px;
+}
+QFrame#passengerPanel QLineEdit:focus {
+    border: 2px solid #1f67ad;
+}
+
+/* ==================== V0.11 订单管理：订单表和安全退票操作保持业务状态清晰 ==================== */
+QLineEdit#orderSearchEdit {
+    min-height: 42px;
+    padding: 0 13px;
+    background-color: #ffffff;
+    border: 1px solid #b7c9da;
+    border-radius: 8px;
+}
+QLineEdit#orderSearchEdit:focus {
+    border: 2px solid #1f67ad;
+}
+QPushButton#refundOrderButton {
+    min-height: 42px;
+    padding: 0 20px;
+    color: #ffffff;
+    background-color: #c2410c;
+    border: 1px solid #9a3412;
+    border-radius: 8px;
+    font-weight: 700;
+}
+QPushButton#refundOrderButton:hover {
+    background-color: #ea580c;
+}
+QPushButton#refundOrderButton:disabled {
+    color: #8293a3;
+    background-color: #e3e9ef;
+    border-color: #ccd6df;
+}
+QTableWidget#orderTable {
+    background-color: #ffffff;
+    alternate-background-color: #f3f7fb;
+    border: 1px solid #c7d5e4;
+    border-radius: 8px;
+    selection-color: #123c69;
+    selection-background-color: #d8eafb;
 }
