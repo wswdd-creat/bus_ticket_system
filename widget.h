@@ -41,6 +41,8 @@ private:
     void refreshSeatInventoryPage();
     void refreshScheduleRows();
     void updateStatistics();
+    bool isRouteSellable(int row, QString *reason = nullptr) const;
+    void focusRouteFromWarning(int routeRow);
     void sellTickets();
 
     // 实名订单：组合筛选、退票和改签。
@@ -51,6 +53,7 @@ private:
     void saveOrders() const;
     void loadOrders();
     void filterOrders();
+    void exportOrders();
     void refundSelectedOrder();
     void rescheduleSelectedOrder();
     void installOrderActionButton(int row);
@@ -83,6 +86,9 @@ private:
     QLabel *revenueTotalLabel = nullptr;
     QLabel *lowStockLabel = nullptr;
     QLabel *overviewInsightLabel = nullptr;
+    QLabel *salesTrendLabel = nullptr;
+    QLabel *popularRoutesLabel = nullptr;
+    QTableWidget *warningTable = nullptr;
     QProgressBar *occupancyProgress = nullptr;
     QSpinBox *ticketQuantitySpin = nullptr;
     QPushButton *sellTicketButton = nullptr;
@@ -106,4 +112,6 @@ private:
     QDateEdit *orderEndDateEdit = nullptr;
     QPushButton *refundOrderButton = nullptr;
     QPushButton *rescheduleOrderButton = nullptr;
+    QPushButton *exportOrderButton = nullptr;
+    QPushButton *exportTransactionButton = nullptr;
 };

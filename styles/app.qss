@@ -735,3 +735,57 @@ QFrame#orderDetailPanel QLabel {
     font-size: 14px;
     line-height: 1.5;
 }
+
+/* ==================== V0.14 运营预警与数据分析 ==================== */
+/* 预警表沿用业务表格风格，并用文字级别与语义色共同表达风险。 */
+QTableWidget#warningTable {
+    color: #243b53;
+    background-color: #ffffff;
+    alternate-background-color: #f6f9fc;
+    border: 1px solid #c7d8e7;
+    border-radius: 8px;
+    gridline-color: #e2eaf2;
+}
+QTableWidget#warningTable::item {
+    min-height: 34px;
+    padding: 4px 8px;
+}
+QTableWidget#warningTable::item:selected {
+    color: #123f70;
+    background-color: #dbeafe;
+}
+/* 轻量图表采用等宽字形，使日期、柱形和数量对齐。 */
+QLabel#salesTrendLabel,
+QLabel#popularRoutesLabel {
+    color: #294861;
+    padding: 8px 12px;
+    background-color: #f7fbff;
+    border: 1px solid #d5e3ee;
+    border-radius: 8px;
+    font-family: "Cascadia Mono", "Microsoft YaHei UI";
+    font-size: 14px;
+    line-height: 1.4;
+}
+/* 报表导出是辅助操作，使用浅色按钮降低视觉权重。 */
+QPushButton#exportOrderButton,
+QPushButton#exportButton {
+    min-height: 40px;
+    padding: 0 16px;
+    color: #17476f;
+    background-color: #edf5fc;
+    border: 1px solid #a9c4da;
+    border-radius: 8px;
+    font-weight: 700;
+}
+QPushButton#exportOrderButton:hover,
+QPushButton#exportButton:hover {
+    color: #ffffff;
+    background-color: #1f67ad;
+    border-color: #15558f;
+}
+QPushButton#exportOrderButton:disabled,
+QPushButton#exportButton:disabled {
+    color: #8796a5;
+    background-color: #e7edf2;
+    border-color: #d3dde6;
+}
