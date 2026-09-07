@@ -2,6 +2,7 @@
 
 #include <QWidget>
 #include <QStringList>
+#include <QJsonObject>
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class Widget; }
@@ -31,7 +32,15 @@ private:
     void saveRoutes() const;
     void loadStations();
     void saveStations() const;
-    bool saveBusinessState() const;
+    bool saveBusinessState();
+    QJsonObject captureSettingsSnapshot() const;
+    bool writeSettingsSnapshot(const QJsonObject &snapshot, QString *error = nullptr) const;
+    bool writeBackupFile(const QString &path, const QJsonObject &snapshot, QString *error = nullptr) const;
+    void reloadBusinessData();
+    void backupBusinessData();
+    void restoreBusinessData();
+    void runDataHealthCheck();
+    void showOperationFeedback(const QString &message, bool success = true);
 
     // 售票中心、席位库存和经营统计。
     void updateTicketSelection(int row);
@@ -80,12 +89,14 @@ private:
     QComboBox *destinationStationCombo = nullptr;
     QStringList stationNames;
     QStringList selectedSeatNumbers;
+    QJsonObject lastSavedSettings;
     QLabel *routeCountLabel = nullptr;
     QLabel *remainingTotalLabel = nullptr;
     QLabel *soldTotalLabel = nullptr;
     QLabel *revenueTotalLabel = nullptr;
     QLabel *lowStockLabel = nullptr;
     QLabel *overviewInsightLabel = nullptr;
+    QLabel *systemBadge = nullptr;
     QLabel *salesTrendLabel = nullptr;
     QLabel *popularRoutesLabel = nullptr;
     QTableWidget *warningTable = nullptr;

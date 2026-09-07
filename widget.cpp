@@ -983,18 +983,22 @@ Widget::Widget(QWidget *parent)
     // ==================== V0.14 历史席位模板自动填充 ====================
     // 选择席位类型时，从同车次最近日期的相同席位复制票价和容量；销量与余票不会复制。
     const auto fillSeatFromHistory = [this] {
-        if (seatServiceCombo->currentIndex() < 0 || seatInventoryTable->currentRow() >= 0) return;
+        // clearSelection() 不会清除 currentRow()，必须按真实选择状态判断是否正在编辑。
+        if (seatServiceCombo->currentIndex() < 0
+            || seatInventoryTable->selectionModel()->hasSelection()) return;
         const QString currentKey = seatServiceCombo->currentData().toString();
         const QString currentNumber = currentKey.section(QChar('|'), 0, 0);
         const QString seatType = seatTypeEditor->currentText();
         if (currentNumber.isEmpty() || seatType.isEmpty()) return;
 
-        // 当前班次已经存在该席位时不自动覆盖，避免误把“添加”变成修改。
-        for (int row = 0; row < ui->routeTable->rowCount(); ++row) {
-            const QString rowKey = ui->routeTable->item(row, Number)->text().toUpper()
-                                   + QChar('|') + ui->routeTable->item(row, DepartureDate)->text();
-            if (rowKey == currentKey
-                && ui->routeTable->item(row, SeatType)->text() == seatType) return;
+        // 当前班次已继承该席位时，自动选中库存行并带出票价、容量，直接进入修改状态。
+        for (int viewRow = 0; viewRow < seatInventoryTable->rowCount(); ++viewRow) {
+            if (seatInventoryTable->item(viewRow, 0)
+                && seatInventoryTable->item(viewRow, 0)->text() == seatType) {
+                seatInventoryTable->selectRow(viewRow);
+                seatInventoryTable->scrollToItem(seatInventoryTable->item(viewRow, 0));
+                return;
+            }
         }
 
         int templateRow = -1;
@@ -1026,9 +1030,13 @@ Widget::Widget(QWidget *parent)
             [fillSeatFromHistory](const QString &) { fillSeatFromHistory(); });
     connect(seatServiceCombo, &QComboBox::currentIndexChanged, this,
             [this, fillSeatFromHistory](int) {
+        // 切换班次时同时清掉表格的当前索引，保证自动填充不会被旧 currentRow 阻断。
         seatInventoryTable->clearSelection();
+        seatInventoryTable->setCurrentCell(-1, -1);
         seatPriceEdit->clear();
         seatCapacityEdit->clear();
+        seatPriceEdit->setToolTip(QString());
+        seatCapacityEdit->setToolTip(QString());
         fillSeatFromHistory();
     });
     connect(addSeatButton, &QPushButton::clicked, this,
@@ -1192,10 +1200,13 @@ Widget::Widget(QWidget *parent)
     connect(ticketShortcut, &QPushButton::clicked, this,
             [this] { contentTabs->setCurrentIndex(3); });
     connect(historyShortcut, &QPushButton::clicked, this,
-            [this] { contentTabs->setCurrentIndex(5);
-    connect(backupDataButton, &QPushButton::clicked, this, &Widget::backupBusinessData);
-    connect(restoreDataButton, &QPushButton::clicked, this, &Widget::restoreBusinessData);
-    connect(healthCheckButton, &QPushButton::clicked, this, &Widget::runDataHealthCheck); });
+            [this] { contentTabs->setCurrentIndex(5); });
+    connect(backupDataButton, &QPushButton::clicked,
+            this, &Widget::backupBusinessData);
+    connect(restoreDataButton, &QPushButton::clicked,
+            this, &Widget::restoreBusinessData);
+    connect(healthCheckButton, &QPushButton::clicked,
+            this, &Widget::runDataHealthCheck);
 
     sellTicketButton = new QPushButton(QStringLiteral("确认售票"), ticketPanel);
     sellTicketButton->setObjectName(QStringLiteral("sellTicketButton"));
@@ -1721,6 +1732,8 @@ Widget::Widget(QWidget *parent)
     loadOrders();
     updateStatistics();
     updateTicketSelection(ui->routeTable->currentRow());
+    // 记录启动完成后的可靠快照，后续保存失败时可以恢复到这里。
+    lastSavedSettings = captureSettingsSnapshot();
 }
 
 // ==================== 班次时间排序 ====================
@@ -3051,18 +3064,312 @@ void Widget::recordTransaction(const QString &type, int routeRow,
     filterTransactions();
 }
 
-// ==================== 业务数据一致性保存 ====================
-// 一次业务操作统一保存班次、订单、流水和站点，并通过 sync 检查落盘结果。
-bool Widget::saveBusinessState() const
+// ==================== V0.16 数据安全：快照与备份文件 ====================
+// 将 QSettings 展平成带版本信息的 JSON，备份文件和失败回滚共用同一格式。
+QJsonObject Widget::captureSettingsSnapshot() const
 {
+    QSettings settings(QStringLiteral("StudentQtProjects"), QStringLiteral("BusTicketSystem"));
+    QJsonObject values;
+    for (const QString &key : settings.allKeys())
+        values.insert(key, QJsonValue::fromVariant(settings.value(key)));
+    return {{QStringLiteral("appId"), QStringLiteral("bus_ticket_system")},
+            {QStringLiteral("formatVersion"), 1},
+            {QStringLiteral("appVersion"), QStringLiteral("V0.16")},
+            {QStringLiteral("backupTime"), QDateTime::currentDateTime().toString(Qt::ISODate)},
+            {QStringLiteral("settings"), values}};
+}
+
+// 校验备份来源和键名后再覆盖设置，避免错误 JSON 污染业务数据。
+bool Widget::writeSettingsSnapshot(const QJsonObject &snapshot, QString *error) const
+{
+    const QJsonValue settingsValue = snapshot.value(QStringLiteral("settings"));
+    if (snapshot.value(QStringLiteral("appId")).toString() != QStringLiteral("bus_ticket_system")
+        || snapshot.value(QStringLiteral("formatVersion")).toInt() != 1
+        || !settingsValue.isObject()) {
+        if (error) *error = QStringLiteral("文件不是受支持的客运售票系统备份。");
+        return false;
+    }
+    const QJsonObject values = settingsValue.toObject();
+    for (auto it = values.constBegin(); it != values.constEnd(); ++it) {
+        const QString key = it.key();
+        if (key != QStringLiteral("stations")
+            && !key.startsWith(QStringLiteral("routes/"))
+            && !key.startsWith(QStringLiteral("orders/"))
+            && !key.startsWith(QStringLiteral("transactions/"))) {
+            if (error) *error = QStringLiteral("备份中包含未知数据项：%1").arg(key);
+            return false;
+        }
+    }
+    QSettings settings(QStringLiteral("StudentQtProjects"), QStringLiteral("BusTicketSystem"));
+    settings.clear();
+    for (auto it = values.constBegin(); it != values.constEnd(); ++it)
+        settings.setValue(it.key(), it.value().toVariant());
+    settings.sync();
+    if (settings.status() != QSettings::NoError) {
+        if (error) *error = QStringLiteral("系统设置存储不可写，请检查当前用户权限。");
+        return false;
+    }
+    return true;
+}
+
+// 使用 QSaveFile 原子写入：只有完整内容成功写出后才替换目标文件。
+bool Widget::writeBackupFile(const QString &path, const QJsonObject &snapshot,
+                             QString *error) const
+{
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly)) {
+        if (error) *error = file.errorString();
+        return false;
+    }
+    const QByteArray payload = QJsonDocument(snapshot).toJson(QJsonDocument::Indented);
+    if (file.write(payload) != payload.size() || !file.commit()) {
+        if (error) *error = file.errorString();
+        return false;
+    }
+    return true;
+}
+
+// ==================== V0.16 数据安全：界面重载与操作反馈 ====================
+void Widget::reloadBusinessData()
+{
+    ui->routeTable->setRowCount(0);
+    orderTable->setRowCount(0);
+    transactionTable->setRowCount(0);
+    stationNames.clear();
+    loadStations();
+    loadRoutes();
+    loadTransactions();
+    loadOrders();
+    filterOrders();
+    filterTransactions();
+    updateStatistics();
+    updateTicketSelection(ui->routeTable->currentRow());
+}
+
+// 顶部状态徽标显示即时结果，数秒后自动恢复为正常运行状态。
+void Widget::showOperationFeedback(const QString &message, bool success)
+{
+    if (!systemBadge) return;
+    systemBadge->setText((success ? QStringLiteral("✓  ") : QStringLiteral("⚠  ")) + message);
+    systemBadge->setProperty("feedbackState", success ? "success" : "error");
+    systemBadge->style()->unpolish(systemBadge);
+    systemBadge->style()->polish(systemBadge);
+    QTimer::singleShot(3800, this, [this] {
+        if (!systemBadge) return;
+        systemBadge->setText(QStringLiteral("●  系统运行正常"));
+        systemBadge->setProperty("feedbackState", "normal");
+        systemBadge->style()->unpolish(systemBadge);
+        systemBadge->style()->polish(systemBadge);
+    });
+}
+
+// ==================== V0.16 数据安全：手动备份与恢复 ====================
+void Widget::backupBusinessData()
+{
+    if (!saveBusinessState()) return;
+    const QString defaultPath = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
+        + QStringLiteral("/客运售票系统备份_%1.json").arg(
+              QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")));
+    const QString path = QFileDialog::getSaveFileName(
+        this, QStringLiteral("备份全部业务数据"), defaultPath,
+        QStringLiteral("JSON 备份文件 (*.json)"));
+    if (path.isEmpty()) return;
+    QString error;
+    if (!writeBackupFile(path, captureSettingsSnapshot(), &error)) {
+        showOperationFeedback(QStringLiteral("备份失败"), false);
+        QMessageBox::critical(this, QStringLiteral("备份失败"), error);
+        return;
+    }
+    showOperationFeedback(QStringLiteral("数据备份完成"));
+    QMessageBox::information(this, QStringLiteral("备份完成"),
+                             QStringLiteral("全部业务数据已安全保存到：\n%1").arg(path));
+}
+
+void Widget::restoreBusinessData()
+{
+    const QString path = QFileDialog::getOpenFileName(
+        this, QStringLiteral("选择业务数据备份"),
+        QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation),
+        QStringLiteral("JSON 备份文件 (*.json)"));
+    if (path.isEmpty()) return;
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly) || file.size() > 20 * 1024 * 1024) {
+        showOperationFeedback(QStringLiteral("备份文件无法读取"), false);
+        QMessageBox::critical(this, QStringLiteral("恢复失败"),
+                              QStringLiteral("文件无法读取或大小超过 20 MB。"));
+        return;
+    }
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
+    const QJsonObject snapshot = document.object();
+    const QJsonObject values = snapshot.value(QStringLiteral("settings")).toObject();
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()
+        || snapshot.value(QStringLiteral("appId")).toString() != QStringLiteral("bus_ticket_system")
+        || snapshot.value(QStringLiteral("formatVersion")).toInt() != 1
+        || !snapshot.value(QStringLiteral("settings")).isObject()) {
+        showOperationFeedback(QStringLiteral("备份格式无效"), false);
+        QMessageBox::critical(this, QStringLiteral("恢复失败"),
+                              QStringLiteral("所选文件不是有效的本系统备份。"));
+        return;
+    }
+    const auto answer = QMessageBox::warning(
+        this, QStringLiteral("确认恢复数据"),
+        QStringLiteral("即将恢复 %1 条班次库存、%2 条订单和 %3 条交易流水。\n"
+                       "当前数据会先自动备份，确认继续吗？")
+            .arg(values.value(QStringLiteral("routes/size")).toInt())
+            .arg(values.value(QStringLiteral("orders/size")).toInt())
+            .arg(values.value(QStringLiteral("transactions/size")).toInt()),
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+    if (answer != QMessageBox::Yes) return;
+
+    const QJsonObject currentSnapshot = captureSettingsSnapshot();
+    const QString safetyPath = QFileInfo(path).absolutePath()
+        + QStringLiteral("/恢复前自动备份_%1.json").arg(
+              QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")));
+    QString error;
+    if (!writeBackupFile(safetyPath, currentSnapshot, &error)) {
+        showOperationFeedback(QStringLiteral("恢复前备份失败"), false);
+        QMessageBox::critical(this, QStringLiteral("恢复已取消"),
+                              QStringLiteral("无法创建恢复前安全备份：%1").arg(error));
+        return;
+    }
+    if (!writeSettingsSnapshot(snapshot, &error)) {
+        QString rollbackError;
+        writeSettingsSnapshot(currentSnapshot, &rollbackError);
+        showOperationFeedback(QStringLiteral("恢复失败，原数据已保留"), false);
+        QMessageBox::critical(this, QStringLiteral("恢复失败"), error);
+        return;
+    }
+    reloadBusinessData();
+    lastSavedSettings = captureSettingsSnapshot();
+    showOperationFeedback(QStringLiteral("数据恢复完成"));
+    QMessageBox::information(this, QStringLiteral("恢复完成"),
+        QStringLiteral("业务数据已恢复。\n恢复前的数据备份在：\n%1").arg(safetyPath));
+}
+
+// ==================== V0.16 数据一致性体检 ====================
+// 只读检查库存恒等式、关联关系、金额和座位冲突，不自动改动业务数据。
+void Widget::runDataHealthCheck()
+{
+    QStringList issues;
+    QSet<QString> routeKeys;
+    int routeRows = 0;
+    for (int row = 0; row < ui->routeTable->rowCount(); ++row) {
+        bool complete = true;
+        for (int column = 0; column < ColumnCount; ++column)
+            complete = complete && ui->routeTable->item(row, column);
+        if (!complete) {
+            issues << QStringLiteral("班次表第 %1 行存在缺失字段。").arg(row + 1);
+            continue;
+        }
+        ++routeRows;
+        const QString number = ui->routeTable->item(row, Number)->text().trimmed();
+        const QString date = ui->routeTable->item(row, DepartureDate)->text().trimmed();
+        const QString seat = ui->routeTable->item(row, SeatType)->text().trimmed();
+        const QString key = number.toUpper() + QChar('|') + date + QChar('|') + seat;
+        if (routeKeys.contains(key))
+            issues << QStringLiteral("发现重复班次席位：%1 / %2 / %3。").arg(number, date, seat);
+        routeKeys.insert(key);
+        const int total = ui->routeTable->item(row, TotalSeats)->text().toInt();
+        const int remaining = ui->routeTable->item(row, Remaining)->text().toInt();
+        const int sold = ui->routeTable->item(row, Number)->data(SoldRole).toInt();
+        if (total < 0 || remaining < 0 || sold < 0 || remaining + sold != total)
+            issues << QStringLiteral("%1 %2 %3 库存不一致：总数 %4，余票 %5，已售 %6。")
+                          .arg(number, date, seat).arg(total).arg(remaining).arg(sold);
+        if (!stationNames.contains(ui->routeTable->item(row, Departure)->text())
+            || !stationNames.contains(ui->routeTable->item(row, Destination)->text()))
+            issues << QStringLiteral("%1 %2 使用了站点字典之外的站名。").arg(number, date);
+        if (!QDate::fromString(date, QStringLiteral("yyyy-MM-dd")).isValid()
+            || !QTime::fromString(ui->routeTable->item(row, DepartureTime)->text(),
+                                  QStringLiteral("HH:mm")).isValid())
+            issues << QStringLiteral("%1 %2 的日期或发车时间格式无效。").arg(number, date);
+    }
+
+    QSet<QString> occupiedSeats;
+    int orderRows = 0;
+    for (int row = 0; row < orderTable->rowCount(); ++row) {
+        if (isOrderDetailRow(orderTable, row)) continue;
+        if (!orderTable->item(row, OrderNumber) || !orderTable->item(row, OrderStatus)) {
+            issues << QStringLiteral("订单表第 %1 行存在缺失字段。").arg(row + 1);
+            continue;
+        }
+        ++orderRows;
+        const QString orderNo = orderTable->item(row, OrderNumber)->text();
+        const int quantity = qMax(1, orderTable->item(row, OrderNumber)
+                                         ->data(OrderQuantityRole).toInt());
+        const double unitPrice = orderTable->item(row, OrderNumber)
+                                     ->data(OrderUnitPriceRole).toDouble();
+        QString amountText = orderTable->item(row, OrderAmount)->text();
+        amountText.remove(QChar(0x00A5));
+        if (qAbs(amountText.toDouble() - unitPrice * quantity) > 0.011)
+            issues << QStringLiteral("订单 %1 的订单金额与单价、数量不一致。").arg(orderNo);
+        if (orderTable->item(row, OrderStatus)->text() == QStringLiteral("已出票")) {
+            const QString number = orderTable->item(row, OrderRoute)->text();
+            const QString date = orderTable->item(row, OrderDate)->text();
+            const QString seatType = orderTable->item(row, OrderSeatType)->text();
+            if (findRouteRow(number, date, seatType) < 0)
+                issues << QStringLiteral("有效订单 %1 找不到对应班次席位。").arg(orderNo);
+            const QString seatNumbers = cleanSeatNumber(
+                orderTable->item(row, OrderNumber)->data(OrderSeatNumberRole).toString());
+            if (seatNumbers != QStringLiteral("—")) {
+                for (const QString &seatNo : seatNumbers.split(QStringLiteral("、"))) {
+                    const QString seatKey = number.toUpper() + QChar('|') + date
+                        + QChar('|') + seatType + QChar('|') + seatNo;
+                    if (occupiedSeats.contains(seatKey))
+                        issues << QStringLiteral("座位冲突：%1 %2 %3 %4 被重复占用。")
+                                      .arg(number, date, seatType, seatNo);
+                    occupiedSeats.insert(seatKey);
+                }
+            }
+        }
+        if (issues.size() >= 100) {
+            issues << QStringLiteral("问题过多，已停止继续扫描。");
+            break;
+        }
+    }
+
+    if (issues.isEmpty()) {
+        showOperationFeedback(QStringLiteral("数据体检通过"));
+        QMessageBox::information(this, QStringLiteral("数据体检通过"),
+            QStringLiteral("已检查 %1 条班次库存和 %2 条订单。\n"
+                           "库存、金额、站点、班次关联及座位占用均未发现异常。")
+                .arg(routeRows).arg(orderRows));
+        return;
+    }
+    showOperationFeedback(QStringLiteral("发现 %1 项数据问题").arg(issues.size()), false);
+    QMessageBox report(QMessageBox::Warning, QStringLiteral("数据体检报告"),
+        QStringLiteral("共发现 %1 项需要关注的数据问题。\n"
+                       "点击“显示详细信息”查看完整清单，系统未自动修改数据。")
+            .arg(issues.size()), QMessageBox::Ok, this);
+    report.setDetailedText(issues.join(QChar('\n')));
+    report.exec();
+}
+
+// ==================== 业务数据一致性保存与失败回滚 ====================
+// 一次业务操作统一保存全部数据；失败时恢复上次可靠快照，并重载界面。
+bool Widget::saveBusinessState()
+{
+    const QJsonObject previous = lastSavedSettings;
     saveRoutes();
     saveOrders();
     saveTransactions();
     saveStations();
     QSettings settings(QStringLiteral("StudentQtProjects"), QStringLiteral("BusTicketSystem"));
     settings.sync();
-    return settings.status() == QSettings::NoError;
+    if (settings.status() != QSettings::NoError) {
+        QString rollbackError;
+        const bool restored = !previous.isEmpty()
+            && writeSettingsSnapshot(previous, &rollbackError);
+        QTimer::singleShot(0, this, [this] { reloadBusinessData(); });
+        showOperationFeedback(restored ? QStringLiteral("保存失败，已自动回滚")
+                                       : QStringLiteral("保存失败，请立即备份现有数据"), false);
+        return false;
+    }
+    lastSavedSettings = captureSettingsSnapshot();
+    showOperationFeedback(QStringLiteral("数据已安全保存"));
+    return true;
 }
+
 
 // 将交易流水写入独立的 QSettings 数组，不与班次数据混在一起。
 void Widget::saveTransactions() const

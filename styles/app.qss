@@ -789,3 +789,41 @@ QPushButton#exportButton:disabled {
     background-color: #e7edf2;
     border-color: #d3dde6;
 }
+
+/* ==================== V0.16 数据安全工具：总览页紧凑操作区 ==================== */
+QLabel#dataSafetyTitle {
+    margin-top: 10px;
+    color: #365b7d;
+    background: transparent;
+    font-size: 13px;
+    font-weight: 700;
+}
+QPushButton#dataSafetyButton {
+    min-height: 34px;
+    padding: 4px 10px;
+    color: #174a78;
+    background-color: #eef6ff;
+    border: 1px solid #bdd3e8;
+    border-radius: 8px;
+    font-weight: 600;
+}
+QPushButton#dataSafetyButton:hover {
+    color: #ffffff;
+    background-color: #256aa8;
+    border-color: #256aa8;
+}
+QPushButton#dataSafetyButton:pressed {
+    background-color: #164c7e;
+}
+
+/* ==================== V0.16 操作反馈：成功绿色、失败红色 ==================== */
+QLabel#systemBadge[feedbackState="success"] {
+    color: #ecfdf5;
+    background-color: #167052;
+    border-color: #45b88b;
+}
+QLabel#systemBadge[feedbackState="error"] {
+    color: #fff1f2;
+    background-color: #b42332;
+    border-color: #ef6a75;
+}
