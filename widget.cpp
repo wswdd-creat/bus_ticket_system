@@ -18,6 +18,13 @@
 #include <QHeaderView>
 #include <QIntValidator>
 #include <QInputDialog>
+#include <QFile>
+#include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QStandardPaths>
+#include <QTimer>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMap>
@@ -168,7 +175,7 @@ Widget::Widget(QWidget *parent)
 {
     // 读取 widget.ui，并创建 Designer 中设计的所有控件。
     ui->setupUi(this);
-    setWindowTitle(QStringLiteral("客运售票运营中心 · V0.14"));
+    setWindowTitle(QStringLiteral("客运售票运营中心 · V0.16"));
     setMinimumSize(1100, 650);
 
     ui->verticalLayout_2->setContentsMargins(28, 22, 28, 22);
@@ -279,7 +286,7 @@ Widget::Widget(QWidget *parent)
     heroTextLayout->addWidget(heroTitle);
     heroTextLayout->addWidget(heroSubtitle);
 
-    auto *systemBadge = new QLabel(QStringLiteral("●  系统运行正常"), heroPanel);
+    systemBadge = new QLabel(QStringLiteral("●  系统运行正常"), heroPanel);
     systemBadge->setObjectName(QStringLiteral("systemBadge"));
     systemBadge->setAlignment(Qt::AlignCenter);
     heroLayout->addLayout(heroTextLayout);
@@ -388,6 +395,27 @@ Widget::Widget(QWidget *parent)
     quickLayout->addWidget(manageShortcut);
     quickLayout->addWidget(ticketShortcut);
     quickLayout->addWidget(historyShortcut);
+    auto *dataSafetyTitle = new QLabel(QStringLiteral("数据安全工具"), quickCard);
+    dataSafetyTitle->setObjectName(QStringLiteral("dataSafetyTitle"));
+    auto *dataSafetyLayout = new QHBoxLayout;
+    dataSafetyLayout->setSpacing(8);
+    auto *backupDataButton = new QPushButton(QStringLiteral("备份数据"), quickCard);
+    backupDataButton->setObjectName(QStringLiteral("dataSafetyButton"));
+    backupDataButton->setIcon(style()->standardIcon(QStyle::SP_DialogSaveButton));
+    auto *restoreDataButton = new QPushButton(QStringLiteral("恢复数据"), quickCard);
+    restoreDataButton->setObjectName(QStringLiteral("dataSafetyButton"));
+    restoreDataButton->setIcon(style()->standardIcon(QStyle::SP_DialogOpenButton));
+    auto *healthCheckButton = new QPushButton(QStringLiteral("数据体检"), quickCard);
+    healthCheckButton->setObjectName(QStringLiteral("dataSafetyButton"));
+    healthCheckButton->setIcon(style()->standardIcon(QStyle::SP_DialogApplyButton));
+    backupDataButton->setToolTip(QStringLiteral("将全部班次、席位、订单、流水和站点保存为 JSON"));
+    restoreDataButton->setToolTip(QStringLiteral("从本系统 JSON 备份恢复全部业务数据"));
+    healthCheckButton->setToolTip(QStringLiteral("检查库存、订单、金额和座位关联是否一致"));
+    dataSafetyLayout->addWidget(backupDataButton);
+    dataSafetyLayout->addWidget(restoreDataButton);
+    dataSafetyLayout->addWidget(healthCheckButton);
+    quickLayout->addWidget(dataSafetyTitle);
+    quickLayout->addLayout(dataSafetyLayout);
     quickLayout->addStretch();
 
     overviewDetails->addWidget(healthCard, 3);
@@ -1164,7 +1192,10 @@ Widget::Widget(QWidget *parent)
     connect(ticketShortcut, &QPushButton::clicked, this,
             [this] { contentTabs->setCurrentIndex(3); });
     connect(historyShortcut, &QPushButton::clicked, this,
-            [this] { contentTabs->setCurrentIndex(5); });
+            [this] { contentTabs->setCurrentIndex(5);
+    connect(backupDataButton, &QPushButton::clicked, this, &Widget::backupBusinessData);
+    connect(restoreDataButton, &QPushButton::clicked, this, &Widget::restoreBusinessData);
+    connect(healthCheckButton, &QPushButton::clicked, this, &Widget::runDataHealthCheck); });
 
     sellTicketButton = new QPushButton(QStringLiteral("确认售票"), ticketPanel);
     sellTicketButton->setObjectName(QStringLiteral("sellTicketButton"));
@@ -1443,23 +1474,61 @@ Widget::Widget(QWidget *parent)
             }
         }
 
-        const int row = ui->routeTable->rowCount();
-        ui->routeTable->insertRow(row);
-        for (int column = 0; column <= ArrivalTime; ++column) {
-            ui->routeTable->setItem(row, column,
-                                    new QTableWidgetItem(values.at(column)));
+        // ==================== V0.15 整套席位模板继承 ====================
+        // 查找同车次最近一期已配置席位的班次，新日期一次性继承全部席位类型、票价和容量。
+        QDate templateDate;
+        for (int sourceRow = 0; sourceRow < ui->routeTable->rowCount(); ++sourceRow) {
+            if (ui->routeTable->item(sourceRow, Number)->text()
+                    .compare(values.at(Number), Qt::CaseInsensitive) != 0
+                || ui->routeTable->item(sourceRow, SeatType)->text() == QStringLiteral("未配置")) {
+                continue;
+            }
+            const QDate candidateDate = QDate::fromString(
+                ui->routeTable->item(sourceRow, DepartureDate)->text(), QStringLiteral("yyyy-MM-dd"));
+            if (candidateDate.isValid() && (!templateDate.isValid() || candidateDate > templateDate))
+                templateDate = candidateDate;
         }
-        const QStringList inventoryPlaceholder{
-            QStringLiteral("未配置"), QStringLiteral("¥0.00"),
-            QStringLiteral("0"), QStringLiteral("0"), QStringLiteral("启用")};
-        for (int offset = 0; offset < inventoryPlaceholder.size(); ++offset) {
-            ui->routeTable->setItem(
-                row, SeatType + offset,
-                new QTableWidgetItem(inventoryPlaceholder.at(offset)));
+
+        QList<int> templateRows;
+        if (templateDate.isValid()) {
+            for (int sourceRow = 0; sourceRow < ui->routeTable->rowCount(); ++sourceRow) {
+                if (ui->routeTable->item(sourceRow, Number)->text()
+                        .compare(values.at(Number), Qt::CaseInsensitive) == 0
+                    && ui->routeTable->item(sourceRow, DepartureDate)->text()
+                           == templateDate.toString(QStringLiteral("yyyy-MM-dd"))
+                    && ui->routeTable->item(sourceRow, SeatType)->text() != QStringLiteral("未配置")) {
+                    templateRows.append(sourceRow);
+                }
+            }
         }
-        // 新班次还没有发生交易，累计销量和营业额均从 0 开始。
-        ui->routeTable->item(row, Number)->setData(SoldRole, 0);
-        ui->routeTable->item(row, Number)->setData(RevenueRole, 0.0);
+
+        const auto appendServiceRow = [this, &values](const QString &seatType,
+                                                       const QString &price,
+                                                       const QString &capacity) {
+            const int targetRow = ui->routeTable->rowCount();
+            ui->routeTable->insertRow(targetRow);
+            for (int column = 0; column <= ArrivalTime; ++column)
+                ui->routeTable->setItem(targetRow, column, new QTableWidgetItem(values.at(column)));
+            const int totalSeats = capacity.toInt();
+            ui->routeTable->setItem(targetRow, SeatType, new QTableWidgetItem(seatType));
+            ui->routeTable->setItem(targetRow, Price, new QTableWidgetItem(price));
+            ui->routeTable->setItem(targetRow, TotalSeats, new QTableWidgetItem(QString::number(totalSeats)));
+            ui->routeTable->setItem(targetRow, Remaining, new QTableWidgetItem(QString::number(totalSeats)));
+            ui->routeTable->setItem(targetRow, Status, new QTableWidgetItem(QStringLiteral("启用")));
+            // 只继承配置，不继承历史销量、收入、余票或已占座位。
+            ui->routeTable->item(targetRow, Number)->setData(SoldRole, 0);
+            ui->routeTable->item(targetRow, Number)->setData(RevenueRole, 0.0);
+        };
+
+        if (templateRows.isEmpty()) {
+            appendServiceRow(QStringLiteral("未配置"), QStringLiteral("¥0.00"), QStringLiteral("0"));
+        } else {
+            for (const int sourceRow : templateRows) {
+                appendServiceRow(ui->routeTable->item(sourceRow, SeatType)->text(),
+                                 ui->routeTable->item(sourceRow, Price)->text(),
+                                 ui->routeTable->item(sourceRow, TotalSeats)->text());
+            }
+        }
         clearInputs();
         if (!saveBusinessState()) {
             QMessageBox::warning(this, QStringLiteral("保存失败"),
@@ -3248,3 +3317,5 @@ Widget::~Widget()
 {
     delete ui;
 }
+
+
