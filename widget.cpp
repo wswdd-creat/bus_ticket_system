@@ -1,4 +1,5 @@
 #include "widget.h"
+#include "database.h"
 #include "ui_widget.h"
 
 #include <QAbstractItemView>
@@ -168,6 +169,35 @@ QLineEdit *field(QWidget *window, const char *name)
 }
 }
 
+// ==================== V0.17 SQLite 数据库初始化与旧数据迁移 ====================
+// 首次启动将旧 QSettings 快照导入 SQLite；以后启动以数据库为准回写兼容镜像。
+bool Widget::initializeDatabase()
+{
+    QString error;
+    auto &database = DatabaseManager::instance();
+    if (!database.initialize(&error)) {
+        QMessageBox::critical(this, QStringLiteral("数据库初始化失败"),
+                              QStringLiteral("SQLite 无法启动，程序将暂时使用旧存储。\n%1").arg(error));
+        return false;
+    }
+
+    if (database.isEmpty(&error)) {
+        if (!database.replaceAll(captureSettingsSnapshot(), &error)) {
+            QMessageBox::critical(this, QStringLiteral("旧数据迁移失败"),
+                                  QStringLiteral("旧数据尚未写入 SQLite：\n%1").arg(error));
+            return false;
+        }
+    } else {
+        const QJsonObject snapshot = database.exportSnapshot(&error);
+        if (snapshot.isEmpty() || !writeSettingsSnapshot(snapshot, &error)) {
+            QMessageBox::critical(this, QStringLiteral("数据库读取失败"),
+                                  QStringLiteral("无法从 SQLite 恢复业务数据：\n%1").arg(error));
+            return false;
+        }
+    }
+    return true;
+}
+
 // ==================== 页面初始化与功能绑定 ====================
 // 构造函数：窗口创建时依次完成界面初始化、信号连接和历史数据读取。
 Widget::Widget(QWidget *parent)
@@ -175,7 +205,8 @@ Widget::Widget(QWidget *parent)
 {
     // 读取 widget.ui，并创建 Designer 中设计的所有控件。
     ui->setupUi(this);
-    setWindowTitle(QStringLiteral("客运售票运营中心 · V0.16"));
+    databaseReady = initializeDatabase();
+    setWindowTitle(QStringLiteral("客运售票运营中心 · V0.17"));
     setMinimumSize(1100, 650);
 
     ui->verticalLayout_2->setContentsMargins(28, 22, 28, 22);
@@ -286,7 +317,9 @@ Widget::Widget(QWidget *parent)
     heroTextLayout->addWidget(heroTitle);
     heroTextLayout->addWidget(heroSubtitle);
 
-    systemBadge = new QLabel(QStringLiteral("●  系统运行正常"), heroPanel);
+    systemBadge = new QLabel(databaseReady
+        ? QStringLiteral("●  SQLite 数据库正常")
+        : QStringLiteral("⚠  兼容存储模式"), heroPanel);
     systemBadge->setObjectName(QStringLiteral("systemBadge"));
     systemBadge->setAlignment(Qt::AlignCenter);
     heroLayout->addLayout(heroTextLayout);
@@ -1732,8 +1765,18 @@ Widget::Widget(QWidget *parent)
     loadOrders();
     updateStatistics();
     updateTicketSelection(ui->routeTable->currentRow());
-    // 记录启动完成后的可靠快照，后续保存失败时可以恢复到这里。
+    // 记录启动完成后的可靠快照，并把首次生成的默认站点同步到 SQLite。
     lastSavedSettings = captureSettingsSnapshot();
+    if (databaseReady) {
+        QString databaseError;
+        if (!DatabaseManager::instance().replaceAll(lastSavedSettings, &databaseError)) {
+            databaseReady = false;
+            QMessageBox::warning(this, QStringLiteral("数据库同步失败"), databaseError);
+        } else if (systemBadge) {
+            systemBadge->setToolTip(QStringLiteral("SQLite 数据库：%1")
+                                        .arg(DatabaseManager::instance().databasePath()));
+        }
+    }
 }
 
 // ==================== 班次时间排序 ====================
@@ -3074,7 +3117,7 @@ QJsonObject Widget::captureSettingsSnapshot() const
         values.insert(key, QJsonValue::fromVariant(settings.value(key)));
     return {{QStringLiteral("appId"), QStringLiteral("bus_ticket_system")},
             {QStringLiteral("formatVersion"), 1},
-            {QStringLiteral("appVersion"), QStringLiteral("V0.16")},
+            {QStringLiteral("appVersion"), QStringLiteral("V0.17")},
             {QStringLiteral("backupTime"), QDateTime::currentDateTime().toString(Qt::ISODate)},
             {QStringLiteral("settings"), values}};
 }
@@ -3156,7 +3199,9 @@ void Widget::showOperationFeedback(const QString &message, bool success)
     systemBadge->style()->polish(systemBadge);
     QTimer::singleShot(3800, this, [this] {
         if (!systemBadge) return;
-        systemBadge->setText(QStringLiteral("●  系统运行正常"));
+        systemBadge->setText(databaseReady
+            ? QStringLiteral("●  SQLite 数据库正常")
+            : QStringLiteral("⚠  兼容存储模式"));
         systemBadge->setProperty("feedbackState", "normal");
         systemBadge->style()->unpolish(systemBadge);
         systemBadge->style()->polish(systemBadge);
@@ -3233,9 +3278,14 @@ void Widget::restoreBusinessData()
                               QStringLiteral("无法创建恢复前安全备份：%1").arg(error));
         return;
     }
-    if (!writeSettingsSnapshot(snapshot, &error)) {
+    if (!writeSettingsSnapshot(snapshot, &error)
+        || (databaseReady
+            && !DatabaseManager::instance().replaceAll(snapshot, &error))) {
+        // JSON 恢复和 SQLite 更新视为一个整体，任一步失败都恢复原快照。
         QString rollbackError;
         writeSettingsSnapshot(currentSnapshot, &rollbackError);
+        if (databaseReady)
+            DatabaseManager::instance().replaceAll(currentSnapshot, &rollbackError);
         showOperationFeedback(QStringLiteral("恢复失败，原数据已保留"), false);
         QMessageBox::critical(this, QStringLiteral("恢复失败"), error);
         return;
@@ -3345,8 +3395,8 @@ void Widget::runDataHealthCheck()
     report.exec();
 }
 
-// ==================== 业务数据一致性保存与失败回滚 ====================
-// 一次业务操作统一保存全部数据；失败时恢复上次可靠快照，并重载界面。
+// ==================== V0.17 SQLite 事务保存与失败回滚 ====================
+// 界面先生成兼容快照，再用数据库事务一次性更新五类业务表，避免只保存一半。
 bool Widget::saveBusinessState()
 {
     const QJsonObject previous = lastSavedSettings;
@@ -3356,17 +3406,24 @@ bool Widget::saveBusinessState()
     saveStations();
     QSettings settings(QStringLiteral("StudentQtProjects"), QStringLiteral("BusTicketSystem"));
     settings.sync();
-    if (settings.status() != QSettings::NoError) {
+    const QJsonObject current = captureSettingsSnapshot();
+    QString databaseError;
+    const bool settingsSaved = settings.status() == QSettings::NoError;
+    const bool databaseSaved = !databaseReady
+        || DatabaseManager::instance().replaceAll(current, &databaseError);
+    if (!settingsSaved || !databaseSaved) {
         QString rollbackError;
         const bool restored = !previous.isEmpty()
             && writeSettingsSnapshot(previous, &rollbackError);
+        // SQLite 的 replaceAll 自带事务，失败时数据库会自动保持旧状态。
         QTimer::singleShot(0, this, [this] { reloadBusinessData(); });
         showOperationFeedback(restored ? QStringLiteral("保存失败，已自动回滚")
                                        : QStringLiteral("保存失败，请立即备份现有数据"), false);
         return false;
     }
-    lastSavedSettings = captureSettingsSnapshot();
-    showOperationFeedback(QStringLiteral("数据已安全保存"));
+    lastSavedSettings = current;
+    showOperationFeedback(databaseReady ? QStringLiteral("数据已写入 SQLite")
+                                        : QStringLiteral("数据已安全保存"));
     return true;
 }
 

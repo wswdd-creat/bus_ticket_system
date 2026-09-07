@@ -27,6 +27,9 @@ public:
     ~Widget();
 
 private:
+    // V0.17 SQLite 初始化与旧 QSettings 数据迁移。
+    bool initializeDatabase();
+
     // 班次和站点数据持久化。
     void loadRoutes();
     void saveRoutes() const;
@@ -80,6 +83,7 @@ private:
 
     Ui::Widget *ui;
     int editingRow = -1;
+    bool databaseReady = false;
 
     QLabel *selectedRouteLabel = nullptr;
     QComboBox *ticketRouteCombo = nullptr;
